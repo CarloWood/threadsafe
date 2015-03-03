@@ -13,10 +13,10 @@ libthreadsafe_la_SOURCES = \
 	aithreadid.cpp
 
 threadsafe_test_SOURCES = \
-	threadsafe_test.cpp
+	aithreadsafe_test.cpp
 
 readwritemutex_test_SOURCES = \
-	readwritemutex_test.cpp
+	AIReadWriteMutex_test.cpp
 
 threadsafe_test_CXXFLAGS = @CXXFLAGS@ @LIBCWD_FLAGS@
 threadsafe_test_LDFLAGS =

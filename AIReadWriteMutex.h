@@ -1,5 +1,5 @@
 /**
- * @file aireadwritemutex.h
+ * @file AIReadWriteMutex.h
  * @brief Implementation of AIReadWriteMutex.
  *
  * Copyright (c) 2010 - 2015, Aleric Inglewood.
@@ -126,7 +126,7 @@ class AIReadWriteMutex
       if (waiting_writer)
 	m_condition_unlocked.notify_one();						// Tell waiting writers.
       else
-	m_condition_no_writer_left.notify_one();					// Tell waiting readers.
+	m_condition_no_writer_left.notify_all();					// Tell waiting readers.
     }
 
     void wr2rdlock(void)
@@ -140,7 +140,7 @@ class AIReadWriteMutex
       // is waiting there: they'd need to have been a reader before and that is not allowed while
       // we had the write lock.
       if (!waiting_writer)
-	m_condition_no_writer_left.notify_one();					// Tell waiting readers.
+	m_condition_no_writer_left.notify_all();					// Tell waiting readers.
     }
 };
 

@@ -1,4 +1,4 @@
-#include "aireadwritemutex.h"
+#include "AIReadWriteMutex.h"
 
 #include <iostream>
 #include <thread>
