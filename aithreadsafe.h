@@ -168,6 +168,9 @@ class ReadWrite
     template<class WRAPPER> friend struct WriteAccess;
 
     RWMUTEX m_read_write_mutex;
+
+  public:
+    void rd2wryield(void) { m_read_write_mutex.rd2wryield(); }
 };
 
 template<class MUTEX>
@@ -343,12 +346,12 @@ struct ConstReadAccess
     };
 
     //! Construct a ConstReadAccess from a constant AIThreadSafe.
-    ConstReadAccess(WRAPPER const& wrapper, bool high_priority = false) : m_wrapper(const_cast<WRAPPER&>(wrapper)), m_state(readlocked)
+    ConstReadAccess(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER&>(wrapper)), m_state(readlocked)
     {
 #if THREADSAFE_DEBUG
       m_wrapper.m_ref++;
 #endif // THREADSAFE_DEBUG
-      m_wrapper.m_read_write_mutex.rdlock(high_priority);
+      m_wrapper.m_read_write_mutex.rdlock();
     }
 
     //! Destruct the Access object.
@@ -400,9 +403,9 @@ struct ReadAccess : public ConstReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::readlocked;
 
     //! Construct a ReadAccess from a non-constant AIThreadSafe.
-    ReadAccess(WRAPPER& wrapper, bool high_priority = false) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
+    ReadAccess(WRAPPER& wrapper) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
     {
-      this->m_wrapper.m_read_write_mutex.rdlock(high_priority);
+      this->m_wrapper.m_read_write_mutex.rdlock();
     }
 
   protected:

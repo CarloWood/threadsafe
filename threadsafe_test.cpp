@@ -39,12 +39,13 @@ class TestRWMutex
   public:
     TestRWMutex() : m_state(unlocked) { }
 
-    void rdlock(bool = false) { assert(m_state == unlocked); m_state = readlocked; }
+    void rdlock() { assert(m_state == unlocked); m_state = readlocked; }
     void rdunlock() { assert(m_state == readlocked); m_state = unlocked; }
     void wrlock() { assert(m_state == unlocked); m_state = writelocked; }
     void wrunlock() { assert(m_state == writelocked); m_state = unlocked; }
     void rd2wrlock() { assert(m_state == readlocked); m_state = writelocked; }
     void wr2rdlock() { assert(m_state == writelocked); m_state = readlocked; }
+    void rd2wryield() { }
 
   public:
     bool is_unlocked() const { return m_state == unlocked; }
@@ -115,11 +116,11 @@ void func_read_const(foo_t::crat const& access)
   assert(is_readlocked(access) || is_writelocked(access));
 }
 
-void func_read(foo_t::rat& access)
+void func_read_and_then_write(foo_t::rat& access)
 {
   std::cout << access->x << std::endl;
   assert(is_readlocked(access) || is_writelocked(access));
-  foo_t::wat write_access(access);
+  foo_t::wat write_access(access);				// This might throw if is_readlocked(access).
   write_access->x = 6;
   assert(is_writelocked(access));
 }
@@ -267,12 +268,25 @@ int main()
   assert(is_unlocked(wrapper));
   {
     // Getting first read access to non-const wrapper, and then write access.
-    foo_t::rat read_access(wrapper);
-    std::cout << read_access->x << std::endl;
-    assert(is_readlocked(wrapper));
-    foo_t::wat write_access(read_access);
-    write_access->x = 4;
-    assert(is_writelocked(wrapper));
+    for(;;)
+    {
+      try
+      {
+	foo_t::rat read_access(wrapper);
+	std::cout << read_access->x << std::endl;
+	assert(is_readlocked(wrapper));
+	foo_t::wat write_access(read_access);		// This might throw.
+	write_access->x = 4;
+	assert(is_writelocked(wrapper));
+      }
+      catch (std::exception const&)
+      {
+	wrapper.rd2wryield();				// Block until the other thread that tries to convert a read to write lock succeeded.
+	// Try again.
+	continue;
+      }
+      break;
+    }
   }
   assert(is_unlocked(wrapper));
   {
@@ -297,16 +311,28 @@ int main()
   }
   assert(is_unlocked(wrapper));
   {
-    // Passing a rat to func_read
-    foo_t::rat read_access(wrapper);			// OK
-    func_read(read_access);
-    assert(is_readlocked(wrapper));
+    for(;;)
+    {
+      try
+      {
+	// Passing a rat to func_read
+	foo_t::rat read_access(wrapper);		// OK
+	func_read_and_then_write(read_access);		// This might throw.
+	assert(is_readlocked(wrapper));
+      }
+      catch(std::exception const&)
+      {
+	wrapper.rd2wryield();
+	continue;
+      }
+      break;
+    }
   }
   assert(is_unlocked(wrapper));
   {
     // Passing a wat to func_read
     foo_t::wat write_access(wrapper);			// OK
-    func_read(write_access);
+    func_read_and_then_write(write_access);
     assert(is_writelocked(wrapper));
   }
   assert(is_unlocked(wrapper));
@@ -407,7 +433,7 @@ int main()
   {
     // Passing a crat to func_read.
     foo_t::crat read_access_const(const_wrapper);	// OK
-    func_read(read_access_const);			// TEST13 FAIL (error: invalid initialization of reference of type ‘AIThreadSafe<Foo, thread_safe::policy::ReadWrite<TestRWMutex> >::rat& {aka thread_safe::ReadAccess<AIThreadSafe<Foo, thread_safe::policy::ReadWrite<TestRWMutex> > >&}’ from expression of type ‘AIThreadSafe<Foo, thread_safe::policy::ReadWrite<TestRWMutex> >::crat {aka thread_safe::ConstReadAccess<AIThreadSafe<Foo, thread_safe::policy::ReadWrite<TestRWMutex> > >}’)
+    func_read_and_then_write(read_access_const);	// TEST13 FAIL (error: invalid initialization of reference of type ‘AIThreadSafe<Foo, thread_safe::policy::ReadWrite<TestRWMutex> >::rat& {aka thread_safe::ReadAccess<AIThreadSafe<Foo, thread_safe::policy::ReadWrite<TestRWMutex> > >&}’ from expression of type ‘AIThreadSafe<Foo, thread_safe::policy::ReadWrite<TestRWMutex> >::crat {aka thread_safe::ConstReadAccess<AIThreadSafe<Foo, thread_safe::policy::ReadWrite<TestRWMutex> > >}’)
   }
 #endif
 #ifdef TEST14

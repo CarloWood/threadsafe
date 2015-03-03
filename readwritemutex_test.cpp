@@ -6,6 +6,7 @@
 #include <cassert>
 
 int const number_of_threads = std::thread::hardware_concurrency();
+int const n = 100000;
 
 long volatile count[9];
 std::atomic<int> write_access;
@@ -37,15 +38,18 @@ AIReadWriteMutex m;
 void run(void)
 {
   int thr = ++thr_count;
-  for (int i = 0; i < 1000000; ++i)
+  double sum = 0;
+  for (int i = 0; i < n; ++i)
   {
     m.wrlock();
     add(1);
     m.wrunlock();
-    for(;;)
+    for(int tries = 1;; ++tries)
     {
+      std::this_thread::yield();
       m.rdlock();
       read(thr);
+      std::this_thread::yield();
       try
       {
 	m.rd2wrlock();
@@ -57,15 +61,16 @@ void run(void)
 	// We have to release our read lock in order to allow the other thread
 	// to succeed. Then we try again, starting with re-reading.
 	m.rdunlock();
-	std::this_thread::yield();
+	m.rd2wryield();
 	continue;
       }
       add(-1, thr);
       m.wrunlock();
+      sum += tries;
       break;
     }
   }
-  std::cout << "Thread " << thr << " finished\n";
+  std::cout << "Thread " << thr << " finished: needed on average " << (sum / n) << " tries.\n";
 }
 
 int main()
