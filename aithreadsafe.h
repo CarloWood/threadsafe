@@ -49,9 +49,9 @@
 // policy (through PolicyMutex) to the instance and shielding it from
 // access without first being locked.
 //
-// Locking and getting access works by creating a scoped access object that
-// takes the wrapper object as argument. Creating the access object obtains
-// the lock, while destructing it releases the lock.
+// Locking and getting access works by creating a scoped "access object"
+// whose constructor takes the wrapper object as argument. Creating the
+// access object obtains the lock, while destructing it releases the lock.
 //
 // There are three types of policies: ReadWrite, Primitive and OneThread.
 // The latter doesn't use any mutex and doesn't do any locking, it does
@@ -69,37 +69,42 @@
 //
 // For generality it is advised to always make the distincting between
 // read-only access and read/write access, even for the primitive (and
-// one thread) policies. The typical declaration of a Wrapper object
-// should involve a typedef. For example:
+// one thread) policies.
+//
+// The typical declaration of a Wrapper object should involve a typedef.
+// For example:
 //
 // typedef aithreadsafe::Wrapper<MyData, aithreadsafe::policy::Primitive<std::mutex>> mydata_t;
 // mydata_t data;
 //
 // After which the following access types can be used:
 //
-// mydata_t::crat : const read access type (cannot be converted to a wat).
-// mydata_t::rat  : read access type.
-// mydata_::wat   : (read/)write access type.
+// mydata_t::crat : Const Read Access Type (cannot be converted to a wat).
+// mydata_t::rat  : Read Access Type.
+// mydata_t::wat  : (read/)Write Access Type.
+// mydata_t::drat : See below.
 //
-// crat provides read access to a const Wrapper and cannot be converted
-// to a wat.
+// crat (const read access type) provides read-only access to a const Wrapper
+// and cannot be converted to a wat (write access type).
 //
-// rat provides read access to a non-const Wrapper and can be converted
-// to a wat; however such conversion can throw a std::exception. If that
-// happens then the rat must be destroyed (catch the exception outside
-// of its scope) followed by calling rd2wryield(). After that one can
-// loop back and recreate the rat.
+// rat (read access type) provides read access to a non-const Wrapper and can
+// be converted to a wat; however such conversion can throw a std::exception.
+// If that happens then the rat must be destroyed (catch the exception outside
+// of its scope) followed by calling rd2wryield(). After that one can loop
+// back and recreate the rat. See the documentation of Wrapper for more
+// details.
 //
-// wat provides (read and) write access to a non-const Wrapper. It
-// can safely be converted to a rat.
+// wat (write access type) provides (read and) write access to a non-const
+// Wrapper. It can safely be converted to a rat, for example by passing it
+// to a function that takes a rat, but that doesn't release the write lock
+// of course. The write lock is only released when the wat is destructed.
 //
-// The Wrapper allows its wrapped object to be constructed with arbitrary
-// parameters simply by passing those parameters to the constructor
-// of the Wrapper.
-//
-// using namespace aithreadsafe;
-// typedef Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>> foo_t;
-// foo_t foo(param1, param2, ...);
+// The need to start with a write lock which then needs to be converted to
+// a read lock gives rise to a third layer: the drat (delayed read access type).
+// A drat cannot be used to access the underlaying data, nor does it contain
+// a mutex itself, but it allows one to convert a write access into a read
+// access without the risk of having an exception being thrown. See the
+// documentation of Wrapper for more details.
 
 #ifndef AITHREADSAFE_H
 #define AITHREADSAFE_H
@@ -151,76 +156,6 @@ class Bits
     T* ptr() { return reinterpret_cast<T*>(std::addressof(m_storage)); }
 };
 
-template<class WRAPPER> struct ConstReadAccess;
-template<class WRAPPER> struct ReadAccess;
-template<class WRAPPER> struct WriteAccess;
-template<class WRAPPER> struct AccessConst;
-template<class WRAPPER> struct Access;
-template<class WRAPPER> struct OTAccessConst;
-template<class WRAPPER> struct OTAccess;
-
-namespace policy
-{
-
-template<class RWMUTEX>
-class ReadWrite
-{
-  protected:
-    template<class WRAPPER>
-    struct access_types
-    {
-      typedef ConstReadAccess<WRAPPER> read_access_const_type;
-      typedef ReadAccess<WRAPPER> read_access_type;
-      typedef WriteAccess<WRAPPER> write_access_type;
-    };
-
-    template<class WRAPPER> friend struct ConstReadAccess;
-    template<class WRAPPER> friend struct ReadAccess;
-    template<class WRAPPER> friend struct WriteAccess;
-
-    RWMUTEX m_read_write_mutex;
-
-  public:
-    void rd2wryield(void) { m_read_write_mutex.rd2wryield(); }
-};
-
-template<class MUTEX>
-class Primitive
-{
-  protected:
-    template<class WRAPPER>
-    struct access_types
-    {
-      typedef AccessConst<WRAPPER> read_access_const_type;
-      typedef Access<WRAPPER> read_access_type;
-      typedef Access<WRAPPER> write_access_type;
-    };
-
-    template<class WRAPPER> friend struct AccessConst;
-    template<class WRAPPER> friend struct Access;
-
-    MUTEX m_primitive_mutex;
-};
-
-class OneThread
-{
-  protected:
-    template<class WRAPPER>
-    struct access_types
-    {
-      typedef OTAccessConst<WRAPPER> read_access_const_type;
-      typedef OTAccess<WRAPPER> read_access_type;
-      typedef OTAccess<WRAPPER> write_access_type;
-    };
-
-#if THREADSAFE_DEBUG
-    mutable std::thread::id m_thread_id;
-#endif // THREADSAFE_DEBUG
-};
-
-} // namespace policy
-} // namespace aithreadsafe
-
 /**
  * @brief A wrapper class for objects that need to be accessed by more than one thread, allowing concurrent readers.
  *
@@ -229,9 +164,9 @@ class OneThread
  * <code>
  * class Foo { public: Foo(int, int); };
  *
- * using namespace aithreadsafe;
+ * using namespace aithreadsafe::policy;
  *
- * typedef Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>> foo_t;
+ * typedef aithreadsafe::Wrapper<Foo, ReadWrite<AIReadWriteMutex>> foo_t;
  * foo_t foo(2, 3);
  *
  * foo_t::rat foo_r(foo);
@@ -244,19 +179,23 @@ class OneThread
  * If <code>foo</code> is constant, you have to use <code>crat</code>.
  *
  * It is possible to pass access objects to a function that
- * downgrades the access (wat -> rat -> crat), for example:
+ * downgrades the access (wat -> rat -> crat; namely, crat is a base
+ * class of rat which in turn is a base class of wat).
+ *
+ * For example:
  *
  * <code>
  * void readfunc(foo_t::crat const& read_access);
  *
  * foo_t::wat foo_w(foo);
- * readfunc(foo_w);	// readfunc will perform read access on foo_w.
+ * readfunc(foo_w);	// readfunc will perform read access on foo_w
+ *                      // (without releasing the write lock!).
  * </code>
  *
  * It is therefore highly recommended to use <code>f(foo_t::crat const& foo_r)</code>
  * as signature for functions that only read foo, unless that function (sometimes)
- * needs to convert its argument to a wat for writing but that implies that
- * it might throw a std::exception as well, in which case the user has to call
+ * needs to convert its argument to a wat for writing. The latter implies that
+ * it might throw a std::exception however, in which case the user has to call
  * rd2wryield() (after destruction of all access objects).
  *
  * For example,
@@ -314,7 +253,9 @@ class OneThread
  * // This resets foo to point to the first file and then returns that.
  * std::string filename = foo_t::wat(foo)->get_first_filename();
  *
- * // WRONG! The state between calling get_first_filename and get_next_filename should be preserved!
+ * // WRONG! The foo_t::wat is destructed and thus foo becomes unlocked,
+ *           but the state between calling get_first_filename and
+ *           get_next_filename should be preserved!
  *
  * foo_t::wat foo_w(foo);	// Wrong. The code below only needs read-access.
  * while (!filename.empty())
@@ -324,7 +265,11 @@ class OneThread
  * }
  * </code>
  *
- * Correct would be
+ * Where we assume that next_filename is a const member function (using
+ * a mutable internally or something). The only-needs-read-access problem
+ * can easily be solved by changing the second wat into a rat of course.
+ * But to keep the object locked while going from write access to read
+ * access we'd have to do the following:
  *
  * <code>
  * for(;;)
@@ -347,15 +292,39 @@ class OneThread
  *   break;
  * }
  * </code>
+ *
+ * And while for most practical cases this will perform perfectly,
+ * it is slightly annoying that the construction of the wat from
+ * foo_r can throw an exception while we did even use the foo_r
+ * yet!
+ *
+ * If this is the case (no need for read access before the write)
+ * then one can do the following instead:
+ *
+ * <code>
+ * foo_t::drat foo_dr(foo);
+ * std::string filename = foo_t::wat(foo_dr)->get_first_filename();
+ * foo_t::rat foo_r(foo_dr);
+ * while (!filename.empty())
+ * {
+ *   something(filename);
+ *   filename = foo_r->next_filename();
+ * }
+ * </code>
+ *
+ * where the construction of the drat does not obtain a lock,
+ * but causes the object to remain read-locked after the destruction
+ * of the wat that it was passed to. Passing it subsequently to
+ * a rat then allows the user to perform read access.
  */
 template<typename T, typename POLICY_MUTEX>
 class Wrapper : public aithreadsafe::Bits<T>, public POLICY_MUTEX
 {
   public:
     // The access types.
-    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::read_access_const_type crat;
-    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::read_access_type rat;
-    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_access_type wat;
+    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::const_read_access_type crat;
+    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::read_access_type       rat;
+    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_access_type      wat;
 
   protected:
     // Only these may access the object (through ptr()).
@@ -392,9 +361,6 @@ class Wrapper : public aithreadsafe::Bits<T>, public POLICY_MUTEX
     }
 #endif
 };
-
-namespace aithreadsafe
-{
 
 /**
  * @brief Read lock object and provide read access.
@@ -458,6 +424,8 @@ struct ConstReadAccess
     // Disallow copy constructing directly.
     ConstReadAccess(ConstReadAccess const&);
 };
+
+template<class WRAPPER> struct WriteAccess;
 
 /**
  * @brief Read lock object and provide read access, with possible promotion to write access.
@@ -627,6 +595,66 @@ struct OTAccess : public OTAccessConst<WRAPPER>
     typename WRAPPER::data_type& operator*() const { return *this->m_wrapper.ptr(); }
 };
 
+namespace policy
+{
+
+template<class RWMUTEX>
+class ReadWrite
+{
+  protected:
+    template<class WRAPPER>
+    struct access_types
+    {
+      typedef ConstReadAccess<WRAPPER> const_read_access_type;
+      typedef ReadAccess<WRAPPER> read_access_type;
+      typedef WriteAccess<WRAPPER> write_access_type;
+    };
+
+    template<class WRAPPER> friend struct ConstReadAccess;
+    template<class WRAPPER> friend struct ReadAccess;
+    template<class WRAPPER> friend struct WriteAccess;
+
+    RWMUTEX m_read_write_mutex;
+
+  public:
+    void rd2wryield(void) { m_read_write_mutex.rd2wryield(); }
+};
+
+template<class MUTEX>
+class Primitive
+{
+  protected:
+    template<class WRAPPER>
+    struct access_types
+    {
+      typedef AccessConst<WRAPPER> const_read_access_type;
+      typedef Access<WRAPPER> read_access_type;
+      typedef Access<WRAPPER> write_access_type;
+    };
+
+    template<class WRAPPER> friend struct AccessConst;
+    template<class WRAPPER> friend struct Access;
+
+    MUTEX m_primitive_mutex;
+};
+
+class OneThread
+{
+  protected:
+    template<class WRAPPER>
+    struct access_types
+    {
+      typedef OTAccessConst<WRAPPER> const_read_access_type;
+      typedef OTAccess<WRAPPER> read_access_type;
+      typedef OTAccess<WRAPPER> write_access_type;
+    };
+
+#if THREADSAFE_DEBUG
+    mutable std::thread::id m_thread_id;
+#endif // THREADSAFE_DEBUG
+};
+
+} // namespace policy
 } // namespace aithreadsafe
 
 #endif // AITHREADSAFE_H
