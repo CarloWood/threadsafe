@@ -82,7 +82,6 @@
 // mydata_t::crat : Const Read Access Type (cannot be converted to a wat).
 // mydata_t::rat  : Read Access Type.
 // mydata_t::wat  : (read/)Write Access Type.
-// mydata_t::drat : See below.
 //
 // crat (const read access type) provides read-only access to a const Wrapper
 // and cannot be converted to a wat (write access type).
@@ -100,8 +99,8 @@
 // of course. The write lock is only released when the wat is destructed.
 //
 // The need to start with a write lock which then needs to be converted to
-// a read lock gives rise to a third layer: the drat (delayed read access type).
-// A drat cannot be used to access the underlaying data, nor does it contain
+// a read lock gives rise to a third layer: the w2rCarry (write->read carry).
+// A w2rCarry cannot be used to access the underlaying data, nor does it contain
 // a mutex itself, but it allows one to convert a write access into a read
 // access without the risk of having an exception being thrown. See the
 // documentation of Wrapper for more details.
@@ -304,9 +303,9 @@ class Bits
  * then one can do the following instead:
  *
  * <code>
- * foo_t::drat foo_dr(foo);
- * std::string filename = foo_t::wat(foo_dr)->get_first_filename();
- * foo_t::rat foo_r(foo_dr);
+ * foo_t::w2rCarry carry(foo);
+ * std::string filename = foo_t::wat(carry)->get_first_filename();
+ * foo_t::rat foo_r(carry);
  * while (!filename.empty())
  * {
  *   something(filename);
@@ -314,10 +313,18 @@ class Bits
  * }
  * </code>
  *
- * where the construction of the drat does not obtain a lock,
+ * where the construction of the carry does not obtain a lock,
  * but causes the object to remain read-locked after the destruction
  * of the wat that it was passed to. Passing it subsequently to
  * a rat then allows the user to perform read access.
+ *
+ * A w2rCarry must be immediately passed to a wat (as opposed to to
+ * a rat) and can subsequently be passed to one or more rat objects
+ * (one will do) in order to access the object read-only. It is not
+ * possible to pass the carry to a second wat object as that would
+ * still require actual read to write locking and therefore could
+ * throw anyway: if that is needed then just use the try / catch
+ * block approach.
  */
 template<typename T, typename POLICY_MUTEX>
 class Wrapper : public aithreadsafe::Bits<T>, public POLICY_MUTEX
