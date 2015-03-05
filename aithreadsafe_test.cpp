@@ -331,6 +331,19 @@ int main()
   }
   assert(is_unlocked(wrapper));
   {
+    foo_t::w2rCarry carry(wrapper);
+    assert(is_unlocked(wrapper));
+    func_write(foo_t::wat(carry));
+    assert(is_readlocked(wrapper));
+    {
+      foo_t::rat read_access(carry);
+      func_read_const(read_access);
+      assert(is_readlocked(wrapper));
+    }
+    assert(is_readlocked(wrapper));
+  }
+  assert(is_unlocked(wrapper));
+  {
     // Passing a wat to func_read
     foo_t::wat write_access(wrapper);			// OK
     func_read_and_then_write(write_access);

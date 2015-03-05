@@ -162,25 +162,26 @@ class Bits
  * For example,
  *
  * <code>
- * class Foo { public: Foo(int, int); };
+ * class Foo { public: Foo(int, int); };	// Some user defined type.
+ * typedef aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>> foo_t;	// Wrapper type for Foo.
+ * foo_t foo(2, 3);				// Instantiation of a Foo(2, 3).
  *
- * using namespace aithreadsafe::policy;
+ * {
+ *   foo_t::rat foo_r(foo);			// Scoped read-lock for foo.
+ *   // Use foo_r-> for read access (returns a Foo const*).
+ * }
  *
- * typedef aithreadsafe::Wrapper<Foo, ReadWrite<AIReadWriteMutex>> foo_t;
- * foo_t foo(2, 3);
- *
- * foo_t::rat foo_r(foo);
- * // Use foo_r-> for read access.
- *
- * foo_t::wat foo_w(foo);
- * // Use foo_w-> for write access.
+ * {
+ *   foo_t::wat foo_w(foo);			// Scoped write-lock for foo.
+ *   // Use foo_w-> for write access (returns a Foo*).
+ * }
  * </code>
  *
  * If <code>foo</code> is constant, you have to use <code>crat</code>.
  *
  * It is possible to pass access objects to a function that
- * downgrades the access (wat -> rat -> crat; namely, crat is a base
- * class of rat which in turn is a base class of wat).
+ * downgrades the access (wat -> rat -> crat (crat is a base
+ * class of rat which in turn is a base class of wat)).
  *
  * For example:
  *
@@ -195,13 +196,14 @@ class Bits
  * It is therefore highly recommended to use <code>f(foo_t::crat const& foo_r)</code>
  * as signature for functions that only read foo, unless that function (sometimes)
  * needs to convert its argument to a wat for writing. The latter implies that
- * it might throw a std::exception however, in which case the user has to call
- * rd2wryield() (after destruction of all access objects).
+ * it might throw a std::exception however (at least that is what AIReadWriteMutex
+ * does when two threads call rd2wrlock() simultaneously), in which case the user
+ * has to call rd2wryield() (after destruction of all access objects).
  *
  * For example,
  *
  * <code>
- * typedef Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>> foo_t;
+ * typedef aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>> foo_t;
  * foo_t foo;
  *
  * void f(foo_t::rat& foo_r)		// Sometimes need to write to foo_r.
@@ -239,7 +241,7 @@ class Bits
  *
  * <code>
  * void f(foo_t::crat const& foo_r);	// Only ever reads.
- * void f(foo_t::rat& foo_r);		// Mostly reads, but sometimes obtains write access in some code path (which might throw).
+ * void f(foo_t::rat& foo_r);		// Mostly reads, but sometimes acquires write access in some code path (which might throw).
  * void f(foo_t::wat const& foo_w);	// Writes (most likely, not necessarily always of course).
  * </code>
  *
@@ -325,12 +327,14 @@ class Wrapper : public aithreadsafe::Bits<T>, public POLICY_MUTEX
     typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::const_read_access_type crat;
     typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::read_access_type       rat;
     typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_access_type      wat;
+    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_to_read_carry    w2rCarry;
 
   protected:
     // Only these may access the object (through ptr()).
     friend crat;
     friend rat;
     friend wat;
+    friend w2rCarry;
 
     typedef T data_type;
     typedef POLICY_MUTEX policy_type;
@@ -375,7 +379,8 @@ struct ConstReadAccess
       readlocked,	//!< A ConstReadAccess or ReadAccess.
       read2writelocked,	//!< A WriteAccess constructed from a ReadAccess.
       writelocked,	//!< A WriteAccess constructed from a ThreadSafe.
-      write2writelocked	//!< A WriteAccess constructed from (the ReadAccess base class of) a WriteAccess.
+      write2writelocked,//!< A WriteAccess constructed from (the ReadAccess base class of) a WriteAccess.
+      carrylocked	//!< A ReadAccess constructed from a Write2ReadCarry.
     };
 
     //! Construct a ConstReadAccess from a constant Wrapper.
@@ -425,7 +430,38 @@ struct ConstReadAccess
     ConstReadAccess(ConstReadAccess const&);
 };
 
+template<class WRAPPER> struct ReadAccess;
 template<class WRAPPER> struct WriteAccess;
+
+/**
+ * @brief Allow to carry the read access from a wat to a rat.
+ */
+template<class WRAPPER>
+class Write2ReadCarry
+{
+  private:
+    WRAPPER& m_wrapper;
+    bool m_used;
+
+  public:
+    Write2ReadCarry(WRAPPER& wrapper) : m_wrapper(wrapper), m_used(false)
+    {
+#if THREADSAFE_DEBUG
+      m_wrapper.m_ref++;
+#endif // THREADSAFE_DEBUG
+    }
+    ~Write2ReadCarry()
+    {
+#if THREADSAFE_DEBUG
+      m_wrapper.m_ref--;
+#endif // THREADSAFE_DEBUG
+      if (m_used)
+	m_wrapper.m_read_write_mutex.rdunlock();
+    }
+
+    friend struct WriteAccess<WRAPPER>;
+    friend struct ReadAccess<WRAPPER>;
+};
 
 /**
  * @brief Read lock object and provide read access, with possible promotion to write access.
@@ -436,11 +472,18 @@ struct ReadAccess : public ConstReadAccess<WRAPPER>
   public:
     typedef typename ConstReadAccess<WRAPPER>::state_type state_type;
     using ConstReadAccess<WRAPPER>::readlocked;
+    using ConstReadAccess<WRAPPER>::carrylocked;
 
     //! Construct a ReadAccess from a non-constant Wrapper.
     ReadAccess(WRAPPER& wrapper) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
     {
       this->m_wrapper.m_read_write_mutex.rdlock();
+    }
+
+    //! Construct a ReadAccess from a Write2ReadCarry object containing an read locked Wrapper. Upon destruction leave the Wrapper read locked.
+    explicit ReadAccess(Write2ReadCarry<WRAPPER> const& w2rc) : ConstReadAccess<WRAPPER>(w2rc.m_wrapper, carrylocked)
+    {
+      assert(w2rc.m_used); // Always pass a w2rCarry to a wat first.
     }
 
   protected:
@@ -473,6 +516,14 @@ struct WriteAccess : public ReadAccess<WRAPPER>
       {
 	this->m_wrapper.m_read_write_mutex.rd2wrlock();
       }
+    }
+
+    //! Construct a WriteAccess from a Write2ReadCarry object containing an unlocked Wrapper. Upon destruction leave the Wrapper read locked.
+    explicit WriteAccess(Write2ReadCarry<WRAPPER>& w2rc) : ReadAccess<WRAPPER>(w2rc.m_wrapper, read2writelocked)
+    {
+      assert(!w2rc.m_used); // Always pass a w2rCarry to the wat first. There can only be one wat.
+      w2rc.m_used = true;
+      this->m_wrapper.m_read_write_mutex.wrlock();
     }
 
     //! Access the underlaying object for (read and) write access.
@@ -608,6 +659,7 @@ class ReadWrite
       typedef ConstReadAccess<WRAPPER> const_read_access_type;
       typedef ReadAccess<WRAPPER> read_access_type;
       typedef WriteAccess<WRAPPER> write_access_type;
+      typedef Write2ReadCarry<WRAPPER> write_to_read_carry;
     };
 
     template<class WRAPPER> friend struct ConstReadAccess;
@@ -630,6 +682,7 @@ class Primitive
       typedef AccessConst<WRAPPER> const_read_access_type;
       typedef Access<WRAPPER> read_access_type;
       typedef Access<WRAPPER> write_access_type;
+      typedef void write_to_read_carry;
     };
 
     template<class WRAPPER> friend struct AccessConst;
@@ -647,6 +700,7 @@ class OneThread
       typedef OTAccessConst<WRAPPER> const_read_access_type;
       typedef OTAccess<WRAPPER> read_access_type;
       typedef OTAccess<WRAPPER> write_access_type;
+      typedef void write_to_read_carry;
     };
 
 #if THREADSAFE_DEBUG
