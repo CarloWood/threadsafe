@@ -54,19 +54,47 @@ class TestRWMutex
     bool is_writelocked() const { return m_state == writelocked; }
 };
 
+class TestMutex
+{
+  private:
+    state_type m_state;
+
+  public:
+    TestMutex() : m_state(unlocked) { }
+
+    void lock() { assert(m_state == unlocked); m_state = writelocked; }
+    void unlock() { assert(m_state == writelocked); m_state = unlocked; }
+
+  public:
+    bool is_unlocked() const { return m_state == unlocked; }
+    bool is_locked() const { return m_state == writelocked; }
+};
+
 struct Foo {
   int x;
 };
 
+#define TEST_READWRITE 1
+
+#if TEST_READWRITE
 typedef Wrapper<Foo, policy::ReadWrite<TestRWMutex>> foo_t;
+#else
+typedef Wrapper<Foo, policy::Primitive<TestMutex>> foo_t;
+#endif
 
 // Hack access to TestRWMutex.
 class LockAccess : public foo_t
 {
   public:
+#if TEST_READWRITE
     bool is_unlocked() const { return this->m_read_write_mutex.is_unlocked(); }
     bool is_readlocked() const { return this->m_read_write_mutex.is_readlocked(); }
     bool is_writelocked() const { return this->m_read_write_mutex.is_writelocked(); }
+#else
+    bool is_unlocked() const { return this->m_primitive_mutex.is_unlocked(); }
+    bool is_readlocked() const { return this->m_primitive_mutex.is_locked(); }
+    bool is_writelocked() const { return this->m_primitive_mutex.is_locked(); }
+#endif
 };
 
 bool is_unlocked(foo_t const& wrapper)
@@ -121,7 +149,11 @@ void func_read_and_then_write(foo_t::rat& access)
 {
   std::cout << access->x << std::endl;
   assert(is_readlocked(access) || is_writelocked(access));
+#if TEST_READWRITE
   foo_t::wat write_access(access);				// This might throw if is_readlocked(access).
+#else
+  foo_t::rat& write_access = access;
+#endif
   write_access->x = 6;
   assert(is_writelocked(access));
 }
@@ -269,16 +301,23 @@ int main()
   assert(is_unlocked(wrapper));
   {
     // Getting first read access to non-const wrapper, and then write access.
+#if TEST_READWRITE
     for(;;)
     {
       try
       {
+#endif
 	foo_t::rat read_access(wrapper);
 	std::cout << read_access->x << std::endl;
 	assert(is_readlocked(wrapper));
+#if TEST_READWRITE
 	foo_t::wat write_access(read_access);		// This might throw.
+#else
+	foo_t::wat& write_access(read_access);
+#endif
 	write_access->x = 4;
 	assert(is_writelocked(wrapper));
+#if TEST_READWRITE
       }
       catch (std::exception const&)
       {
@@ -288,6 +327,7 @@ int main()
       }
       break;
     }
+#endif
   }
   assert(is_unlocked(wrapper));
   {
@@ -312,14 +352,17 @@ int main()
   }
   assert(is_unlocked(wrapper));
   {
+#if TEST_READWRITE
     for(;;)
     {
       try
       {
+#endif
 	// Passing a rat to func_read
 	foo_t::rat read_access(wrapper);		// OK
 	func_read_and_then_write(read_access);		// This might throw.
 	assert(is_readlocked(wrapper));
+#if TEST_READWRITE
       }
       catch(std::exception const&)
       {
@@ -328,7 +371,9 @@ int main()
       }
       break;
     }
+#endif
   }
+#if TEST_READWRITE
   assert(is_unlocked(wrapper));
   {
     foo_t::w2rCarry carry(wrapper);
@@ -342,6 +387,7 @@ int main()
     }
     assert(is_readlocked(wrapper));
   }
+#endif
   assert(is_unlocked(wrapper));
   {
     // Passing a wat to func_read

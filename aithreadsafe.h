@@ -330,21 +330,20 @@ template<typename T, typename POLICY_MUTEX>
 class Wrapper : public aithreadsafe::Bits<T>, public POLICY_MUTEX
 {
   public:
+    typedef T data_type;
+    typedef POLICY_MUTEX policy_type;
+
     // The access types.
     typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::const_read_access_type crat;
     typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::read_access_type       rat;
     typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_access_type      wat;
     typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_to_read_carry    w2rCarry;
 
-  protected:
     // Only these may access the object (through ptr()).
     friend crat;
     friend rat;
     friend wat;
     friend w2rCarry;
-
-    typedef T data_type;
-    typedef POLICY_MUTEX policy_type;
 
   public:
     // Allow arbitrary parameters to be passed for construction.
@@ -656,6 +655,15 @@ struct OTAccess : public OTAccessConst<WRAPPER>
 namespace policy
 {
 
+template<typename T> struct helper { static constexpr bool value = false; };
+template<typename T> struct unsupported_w2rCarry
+{
+  static_assert(helper<T>::value, "\n"
+      "* The Primitive/OneThread policy does not support w2rCarry,\n"
+      "* it makes no sense and would require extra space and cpu cycles to make it work.\n"
+      "* Instead, of '{ foo_t::w2rCarry carry(foo); { foo_t::wat foo_rw(carry); ... } foo_t::rat foo_r(carry); ... }',\n"
+      "* just use    '{ foo_t::wat foo_rw(carry); ... }'\n"); };
+
 template<class RWMUTEX>
 class ReadWrite
 {
@@ -689,7 +697,7 @@ class Primitive
       typedef AccessConst<WRAPPER> const_read_access_type;
       typedef Access<WRAPPER> read_access_type;
       typedef Access<WRAPPER> write_access_type;
-      typedef void write_to_read_carry;
+      typedef unsupported_w2rCarry<typename WRAPPER::policy_type> write_to_read_carry;
     };
 
     template<class WRAPPER> friend struct AccessConst;
@@ -707,7 +715,7 @@ class OneThread
       typedef OTAccessConst<WRAPPER> const_read_access_type;
       typedef OTAccess<WRAPPER> read_access_type;
       typedef OTAccess<WRAPPER> write_access_type;
-      typedef void write_to_read_carry;
+      typedef unsupported_w2rCarry<typename WRAPPER::policy_type> write_to_read_carry;
     };
 
 #if THREADSAFE_DEBUG
