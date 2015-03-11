@@ -118,22 +118,27 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <boost/math/common_factor.hpp>
 
 #define THREADSAFE_DEBUG defined(CWDEBUG)
 
 namespace aithreadsafe
 {
 
-template<typename T>
+template<typename T, size_t align = alignof(T), size_t blocksize = align>
 class Bits
 {
+  public:
+    enum { size = ((sizeof(T) + blocksize - 1) / blocksize) * blocksize,	// sizeof(T) rounded up to multiple of blocksize.
+           alignment = boost::math::static_lcm<align, alignof(T)>::value };	// Properly aligned for T and aligned to 'align'.
+
   private:
     // AIThreadSafe is a wrapper around an instance of T.
     // Because T might not have a default constructor, it is constructed
     // 'in place', with placement new, in the storage reserved here.
     //
     // Properly aligned uninitialized storage for T.
-    typename std::aligned_storage<sizeof(T), alignof(T)>::type m_storage;
+    typename std::aligned_storage<size, alignment>::type m_storage;
 
   public:
     // The wrapped objects are constructed in-place with placement new *outside*
@@ -144,10 +149,10 @@ class Bits
     // Only for use by AITHREADSAFE, see below.
     void* storage() const { return std::addressof(m_storage); }
 
-    // Cast a T* back to Bits<T>. This is the inverse of storage().
+    // Cast a T* back to Bits<T, align, blocksize>. This is the inverse of storage().
     // This assumes that addressof(m_storage) == this, in storage().
-    static Bits<T>* wrapper_cast(T* ptr) { return reinterpret_cast<Bits<T>*>(ptr); }
-    static Bits<T> const* wrapper_cast(T const* ptr) { return reinterpret_cast<Bits<T> const*>(ptr); }
+    static Bits<T, align, blocksize>* wrapper_cast(T* ptr) { return reinterpret_cast<Bits<T, align, blocksize>*>(ptr); }
+    static Bits<T, align, blocksize> const* wrapper_cast(T const* ptr) { return reinterpret_cast<Bits<T, align, blocksize> const*>(ptr); }
 
   protected:
     // Accessors.
@@ -326,8 +331,8 @@ class Bits
  * throw anyway: if that is needed then just use the try / catch
  * block approach.
  */
-template<typename T, typename POLICY_MUTEX>
-class Wrapper : public aithreadsafe::Bits<T>, public POLICY_MUTEX
+template<typename T, typename POLICY_MUTEX, size_t align = alignof(T), size_t blocksize = align>
+class Wrapper : public aithreadsafe::Bits<T, align, blocksize>, public POLICY_MUTEX
 {
   public:
     typedef T data_type;
@@ -353,7 +358,7 @@ class Wrapper : public aithreadsafe::Bits<T>, public POLICY_MUTEX
       : m_ref(0)
 #endif // THREADSAFE_DEBUG
     {
-      new (aithreadsafe::Bits<T>::ptr()) T(args ...);
+      new (aithreadsafe::Bits<T, align, blocksize>::ptr()) T(args ...);
     }
 
 #if THREADSAFE_DEBUG
