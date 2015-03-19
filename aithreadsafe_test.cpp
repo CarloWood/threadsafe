@@ -8,7 +8,7 @@
 using namespace aithreadsafe;
 
 template<int size, typename T>
-void do_asserts(void)
+void do_asserts()
 {
   static_assert(sizeof(T) == sizeof(Bits<T>), "sizeof(Bits<T) != sizeof(T)!");
   static_assert(alignof(T) == alignof(Wrapper<T, policy::OneThread>), "alignof(Wrapper<T, OneThread>) != alignof(T)!");
@@ -16,7 +16,7 @@ void do_asserts(void)
 }
 
 template<int size>
-void do_size_test(void)
+void do_size_test()
 {
   struct T0 { char a[size]; };
   struct T1 { char x; char a[size]; };

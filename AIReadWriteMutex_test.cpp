@@ -35,7 +35,7 @@ inline void read(int i)
 
 AIReadWriteMutex m;
 
-void run(void)
+void run()
 {
   int thr = ++thr_count;
   double sum = 0;

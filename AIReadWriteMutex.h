@@ -38,7 +38,7 @@
 class AIReadWriteMutex
 {
   public:
-    AIReadWriteMutex(void) : m_readers_count(0), m_waiting_writers(0), m_rd2wr_count(0) { }
+    AIReadWriteMutex() : m_readers_count(0), m_waiting_writers(0), m_rd2wr_count(0) { }
 
   private:
     std::mutex m_state_mutex;					//!< Guards all member variables below.
@@ -51,14 +51,14 @@ class AIReadWriteMutex
     int m_rd2wr_count;						//!< Number of threads that try to go from a read lock to a write lock.
 
   public:
-    void rdlock(void)
+    void rdlock()
     {
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
       m_condition_no_writer_left.wait(lk, [&]{return m_readers_count >= 0;});		// Wait till m_readers_count is no longer -1.
       ++m_readers_count;								// One more reader.
     }
 
-    void rdunlock(void)
+    void rdunlock()
     {
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
       if (--m_readers_count <= 1)							// Decrease reader count. Was this the (second) last reader?
@@ -77,7 +77,7 @@ class AIReadWriteMutex
       }
     }
 
-    void wrlock(void)
+    void wrlock()
     {
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
       ++m_waiting_writers;								// Stop readers from being woken up.
@@ -86,7 +86,7 @@ class AIReadWriteMutex
       m_readers_count = -1;								// We are a writer now.
     }
 
-    void rd2wrlock(void)
+    void rd2wrlock()
     {
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
       if (++m_rd2wr_count > 1)								// Only the first thread that calls rd2wrlock will get passed this.
@@ -109,14 +109,14 @@ class AIReadWriteMutex
 	m_condition_rd2wr_count_zero.notify_one();					// Allow additional calls to rd2wrlock().
     }
 
-    void rd2wryield(void)
+    void rd2wryield()
     {
       std::this_thread::yield();
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
       m_condition_rd2wr_count_zero.wait(lk, [&]{return m_rd2wr_count == 0;});
     }
 
-    void wrunlock(void)
+    void wrunlock()
     {
       m_state_mutex.lock();								// Get exclusive access.
       m_readers_count = 0;								// We have no writer anymore.
@@ -129,7 +129,7 @@ class AIReadWriteMutex
 	m_condition_no_writer_left.notify_all();					// Tell waiting readers.
     }
 
-    void wr2rdlock(void)
+    void wr2rdlock()
     {
       m_state_mutex.lock();								// Get exclusive access.
       m_readers_count = 1;								// Turn writer into a reader.

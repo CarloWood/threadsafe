@@ -689,7 +689,7 @@ class ReadWrite
     RWMUTEX m_read_write_mutex;
 
   public:
-    void rd2wryield(void) { m_read_write_mutex.rd2wryield(); }
+    void rd2wryield() { m_read_write_mutex.rd2wryield(); }
 };
 
 template<class MUTEX>
