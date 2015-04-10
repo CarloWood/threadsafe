@@ -210,7 +210,7 @@ class Bits
  * typedef aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>> foo_t;
  * foo_t foo;
  *
- * void f(foo_t::rat& foo_r)		// Sometimes need to write to foo_r.
+ * void f(foo_t::rat& foo_r)		// Sometimes needs to write to foo_r.
  * {
  *   // Read access here.
  *   foo_t::wat foo_w(foo_r);		// This might throw.
@@ -271,11 +271,11 @@ class Bits
  * }
  * </code>
  *
- * Where we assume that next_filename is a const member function (using
- * a mutable internally or something). The only-needs-read-access problem
- * can easily be solved by changing the second wat into a rat of course.
- * But to keep the object locked while going from write access to read
- * access we'd have to do the following:
+ * Where we assume that next_filename is a const member function (using a mutable
+ * internally or something). The only-needs-read-access problem above, can easily
+ * be solved by changing the second wat into a rat of course. But to keep the
+ * object locked while going from write access to read access we'd have to do the
+ * following:
  *
  * <code>
  * for(;;)
@@ -301,7 +301,7 @@ class Bits
  *
  * And while for most practical cases this will perform perfectly,
  * it is slightly annoying that the construction of the wat from
- * foo_r can throw an exception while we did even use the foo_r
+ * foo_r can throw an exception while we didn't even use the foo_r
  * yet!
  *
  * If this is the case (no need for read access before the write)
@@ -667,7 +667,7 @@ template<typename T> struct unsupported_w2rCarry
       "* The Primitive/OneThread policy does not support w2rCarry,\n"
       "* it makes no sense and would require extra space and cpu cycles to make it work.\n"
       "* Instead, of '{ foo_t::w2rCarry carry(foo); { foo_t::wat foo_rw(carry); ... } foo_t::rat foo_r(carry); ... }',\n"
-      "* just use    '{ foo_t::wat foo_rw(carry); ... }'\n"); };
+      "* just use    '{ foo_t::wat foo_rw(foo); ... }'\n"); };
 
 template<class RWMUTEX>
 class ReadWrite
