@@ -333,7 +333,7 @@ int main()
   {
     // Passing a crat to func_read_const
     foo_t::crat read_access_const(const_wrapper);	// OK
-    func_read_const(read_access_const);	
+    func_read_const(read_access_const);
     assert(is_readlocked(wrapper));
   }
   assert(is_unlocked(wrapper));
