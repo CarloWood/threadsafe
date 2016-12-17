@@ -2,7 +2,10 @@
  * @file AIReadWriteMutex.h
  * @brief Implementation of AIReadWriteMutex.
  *
- * Copyright (c) 2010 - 2015, Aleric Inglewood.
+ * Copyright (C) 2010, 2016  Carlo Wood.
+ *
+ * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
+ * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
@@ -20,10 +23,13 @@
  * CHANGELOG
  *   and additional copyright holders.
  *
- *   01/03/2015
- *   Moved code from Singularity to separate repository.
- *   Changed the license to the GNU Affero General Public License.
- *   Major rewrite to make it more generic and use C++11 thread support.
+ *   2015/03/01
+ *   - Moved code from Singularity to separate repository.
+ *   - Changed the license to the GNU Affero General Public License.
+ *   - Major rewrite to make it more generic and use C++11 thread support.
+ *
+ *   2016/12/17
+ *   - Transfered copyright to Carlo Wood.
  */
 
 #ifndef AIREADWRITEMUTEX_H

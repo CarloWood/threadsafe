@@ -2,7 +2,10 @@
  * @file aithreadsafe.h
  * @brief Implementation of the aithreadsafe namespace.
  *
- * Copyright (c) 2010 - 2015, Aleric Inglewood.
+ * Copyright (C) 2010, 2016  Carlo Wood.
+ *
+ * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
+ * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
@@ -20,28 +23,31 @@
  * CHANGELOG
  *   and additional copyright holders.
  *
- *   31/03/2010
- *   Initial version, written by Aleric Inglewood @ SL
+ *   2010/03/31
+ *   - Initial version, written by Aleric Inglewood @ SL
  *
- *   14/03/2012
- *   Added AIThreadSafeSingleThread and friends.
- *   Added AIAccessConst (and derived AIAccess from it) to allow read
- *   access to a const AIThreadSafeSimple.
+ *   2012/03/14
+ *   - Added AIThreadSafeSingleThread and friends.
+ *   - Added AIAccessConst (and derived AIAccess from it) to allow read
+ *     access to a const AIThreadSafeSimple.
  *
- *   26/01/2013
- *   Added support for LLCondition to AIThreadSafeSimple.
+ *   2013/01/26
+ *   - Added support for LLCondition to AIThreadSafeSimple.
  *
- *   24/02/2015
- *   Moved code from Singularity to separate repository.
- *   Changed the license to the GNU Affero General Public License.
- *   Did a major rewrite to make it more generic and use C++11
- *   std::thread support: now only one AIThreadSafe class is left,
- *   everything else is in the namespace thread_safe. Introduced
- *   the policy classes.
+ *   2015/02/24
+ *   - Moved code from Singularity to separate repository.
+ *   - Changed the license to the GNU Affero General Public License.
+ *   - Did a major rewrite to make it more generic and use C++11
+ *     std::thread support: now only one AIThreadSafe class is left,
+ *     everything else is in the namespace thread_safe.
+ *   - Introduced the policy classes.
  *
- *   03/03/2015
- *   Renamed thread_safe to aithreadsafe and
- *   renamed AIThreadSafe to aithreadsafe::Wrapper.
+ *   2015/03/03
+ *   - Renamed thread_safe to aithreadsafe and renamed AIThreadSafe
+ *     to aithreadsafe::Wrapper.
+ *
+ *   2016/12/17
+ *   - Transfered copyright to Carlo Wood.
  */
 
 // This file defines a wrapper template class for arbitrary types T
