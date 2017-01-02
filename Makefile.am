@@ -1,4 +1,4 @@
-AM_CPPFLAGS=-iquote $(top_srcdir)
+AM_CPPFLAGS = -iquote $(top_srcdir)
 
 noinst_LTLIBRARIES = libthreadsafe.la
 bin_PROGRAMS = threadsafe_test readwritemutex_test
