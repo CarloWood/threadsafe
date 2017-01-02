@@ -21,6 +21,7 @@ For example, to create an object of type <tt>Foo</tt>
 that has read/write protection, one could do:
 
 <pre>
+<code>
 using namespace aithreadsafe;
 typedef Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>> foo_t;
 
@@ -62,6 +63,7 @@ void v(foo_t& foo)
     break;
   }
 }
+</code>
 </pre>
 
 ## Checking out a project that uses the ai-threadsafe submodule.
