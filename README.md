@@ -3,7 +3,7 @@
 This repository is a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules)
 providing C++ utilities for larger projects, including:
 
-* <tt>aithreadsafe::Wrapper&lt;T, policy::P&gt;<tt> : template class to construct a T / mutex pair with locking policy P.
+* <tt>aithreadsafe::Wrapper&lt;T, policy::P&gt;</tt> : template class to construct a T / mutex pair with locking policy P.
 * <tt>ReadWrite</tt>, <tt>Primitive</tt>, <tt>OneThread</tt> : Locking policies.
 * <tt>AccessConst</tt> and <tt>Access</tt> : Obtain read/write access to simply locked ThreadSafe objects.
 * <tt>ConstReadAccess</tt>, <tt>ReadAccess</tt> and <tt>WriteAccess</tt> : Obtain access to read/write projected ThreadSafe objects.
