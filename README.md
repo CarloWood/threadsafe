@@ -20,49 +20,49 @@ The root project should be using
 For example, to create an object of type <tt>Foo</tt>
 that has read/write protection, one could do:
 
-<pre>
-    using namespace aithreadsafe;
-    typedef Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>> foo_t;
+```C++
+using namespace aithreadsafe;
+typedef Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>> foo_t;
 
-    // Create an object Foo, AIReadWriteMutex pair. Foo will be inaccessible.
-    foo_t foo;
+// Create an object Foo, AIReadWriteMutex pair. Foo will be inaccessible.
+foo_t foo;
 
-    // A function that gets an already read-locked foo passed, created from a const foo_t.
-    void f(foo_t::crat const& foo_cr) { foo_cr->const_member(); }
+// A function that gets an already read-locked foo passed, created from a const foo_t.
+void f(foo_t::crat const& foo_cr) { foo_cr->const_member(); }
 
-    // A function that gets a non-const foo_t passed and write locks it to get write access.
-    void g(foo_t& foo)
-    {
-      foo_t::wat foo_w(foo);        // Obtain lock.
-      foo_w->write_access();
-      f(foo_w);                     // Being write locked is OK to pass too.
-    }                               // Release lock.
+// A function that gets a non-const foo_t passed and write locks it to get write access.
+void g(foo_t& foo)
+{
+  foo_t::wat foo_w(foo);        // Obtain lock.
+  foo_w->write_access();
+  f(foo_w);                     // Being write locked is OK to pass too.
+}                               // Release lock.
 
-    // A function that gets a read-locked foo passed but needs write access.
-    void h(foo_t::rat& foo_r)
-    {
-      foo_t::wat foo_w(foo_r);      // Convert read to write lock without release it.
-      foo_w->write_access();        // This might throw, see below. Normally it just blocks
-                                    // until all threads with read-locks unlocked it.
+// A function that gets a read-locked foo passed but needs write access.
+void h(foo_t::rat& foo_r)
+{
+  foo_t::wat foo_w(foo_r);      // Convert read to write lock without release it.
+  foo_w->write_access();        // This might throw, see below. Normally it just blocks
+                                // until all threads with read-locks unlocked it.
+}
+
+// A function that takes a read-lock most of the time
+// but needs to call h() at the end.
+void v(foo_t& foo)
+{
+  for(;;) {
+    try {
+      foo_t::rat foo_r(foo);
+      // Stuff here during which we cannot release the read lock.
+      h(foo_r); // Throws if some other thread is also trying to get a read-->write lock.
+    } catch(std::exception const&) {
+      foo.rd2wryield();
+      continue;
     }
-
-    // A function that takes a read-lock most of the time
-    // but needs to call h() at the end.
-    void v(foo_t& foo)
-    {
-      for(;;) {
-        try {
-          foo_t::rat foo_r(foo);
-          // Stuff here during which we cannot release the read lock.
-          h(foo_r); // Throws if some other thread is also trying to get a read-->write lock.
-        } catch(std::exception const&) {
-          foo.rd2wryield();
-          continue;
-        }
-        break;
-      }
-    }
-</pre>
+    break;
+  }
+}
+```
 
 ## Checking out a project that uses the ai-threadsafe submodule.
 
