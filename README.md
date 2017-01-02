@@ -41,9 +41,10 @@ void g(foo_t& foo)
 // A function that gets a read-locked foo passed but needs write access.
 void h(foo_t::rat& foo_r)
 {
-  foo_t::wat foo_w(foo_r);      // Convert read to write lock without release it.
-  foo_w->write_access();        // This might throw, see below. Normally it just blocks
-                                // until all threads with read-locks unlocked it.
+  // The next line might throw, see below. Normally it would just
+  // block until all other threads released their read-locks.
+  foo_t::wat foo_w(foo_r);      // Convert read to write lock without releasing the lock.
+  foo_w->write_access();
 }
 
 // A function that takes a read-lock most of the time
