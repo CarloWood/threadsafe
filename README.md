@@ -4,7 +4,7 @@ This repository is a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Su
 providing C++ utilities for larger projects, including:
 
 * <tt>AIReadWriteMutex</tt> : A class that provides read/write locking.
-* <tt>AccessConst</tt> and <tt>Access<tt> : Obtain read/write access to simply locked ThreadSafe objects.
+* <tt>AccessConst</tt> and <tt>Access</tt> : Obtain read/write access to simply locked ThreadSafe objects.
 * <tt>ConstReadAccess</tt>, <tt>ReadAccess</tt> and <tt>WriteAccess</tt> : Obtain access to read/write projected ThreadSafe objects.
 * Several utilities like <tt>is_single_threaded</tt>.
 
