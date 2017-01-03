@@ -3,7 +3,6 @@ AM_CPPFLAGS = -iquote $(top_srcdir)
 noinst_LTLIBRARIES = libthreadsafe.la
 bin_PROGRAMS = threadsafe_test readwritemutex_test
 
-libthreadsafe_la_CXXFLAGS = @LIBCWD_FLAGS@
 libthreadsafe_la_SOURCES = \
 	aithreadid.cpp \
 	aithreadid.h
@@ -15,6 +14,8 @@ threadsafe_test_SOURCES = \
 readwritemutex_test_SOURCES = \
 	AIReadWriteMutex_test.cpp \
 	AIReadWriteMutex.h
+
+libthreadsafe_la_CXXFLAGS = @LIBCWD_FLAGS@
 
 threadsafe_test_CXXFLAGS = @LIBCWD_FLAGS@
 threadsafe_test_LDADD = ../utils/libutils.la ../cwd/libdebug.la @LIBCWD_LIBS@
