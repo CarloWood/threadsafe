@@ -18,10 +18,10 @@ readwritemutex_test_SOURCES = \
 libthreadsafe_la_CXXFLAGS = @LIBCWD_FLAGS@
 
 threadsafe_test_CXXFLAGS = @LIBCWD_FLAGS@
-threadsafe_test_LDADD = ../utils/libutils.la ../cwd/libdebug.la @LIBCWD_LIBS@
+threadsafe_test_LDADD = ../utils/libutils.la ../cwd/libcwd.la @LIBCWD_LIBS@
 
 readwritemutex_test_CXXFLAGS = @LIBCWD_FLAGS@
-readwritemutex_test_LDADD = ../utils/libutils.la ../cwd/libdebug.la @LIBCWD_LIBS@
+readwritemutex_test_LDADD = ../utils/libutils.la ../cwd/libcwd.la @LIBCWD_LIBS@
 
 # --------------- Maintainer's Section
 
