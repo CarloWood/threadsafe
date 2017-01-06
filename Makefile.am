@@ -4,15 +4,15 @@ noinst_LTLIBRARIES = libthreadsafe.la
 bin_PROGRAMS = threadsafe_test readwritemutex_test
 
 libthreadsafe_la_SOURCES = \
-	aithreadid.cpp \
+	aithreadid.cxx \
 	aithreadid.h
 
 threadsafe_test_SOURCES = \
-	aithreadsafe_test.cpp \
+	aithreadsafe_test.cxx \
 	aithreadsafe.h
 
 readwritemutex_test_SOURCES = \
-	AIReadWriteMutex_test.cpp \
+	AIReadWriteMutex_test.cxx \
 	AIReadWriteMutex.h
 
 libthreadsafe_la_CXXFLAGS = @LIBCWD_FLAGS@
