@@ -1,8 +1,8 @@
 /**
- * @file AIReadWriteMutex.h
+ * @file
  * @brief Implementation of AIReadWriteMutex.
  *
- * Copyright (C) 2010, 2016  Carlo Wood.
+ * Copyright (C) 2010, 2016, 2017  Carlo Wood.
  *
  * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
  * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
