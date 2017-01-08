@@ -111,8 +111,7 @@
 // access without the risk of having an exception being thrown. See the
 // documentation of Wrapper for more details.
 
-#ifndef AITHREADSAFE_H
-#define AITHREADSAFE_H
+#pragma once
 
 #include "aithreadid.h"
 
@@ -736,5 +735,3 @@ class OneThread
 
 } // namespace policy
 } // namespace aithreadsafe
-
-#endif // AITHREADSAFE_H

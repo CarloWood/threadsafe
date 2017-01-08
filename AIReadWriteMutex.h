@@ -32,8 +32,7 @@
  *   - Transfered copyright to Carlo Wood.
  */
 
-#ifndef AIREADWRITEMUTEX_H
-#define AIREADWRITEMUTEX_H
+#pragma once
 
 #include <mutex>
 #include <condition_variable>
@@ -149,5 +148,3 @@ class AIReadWriteMutex
 	m_condition_no_writer_left.notify_all();					// Tell waiting readers.
     }
 };
-
-#endif // AIREADWRITEMUTEX_H
