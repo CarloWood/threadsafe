@@ -1,5 +1,5 @@
 /**
- * @file aithreadsafe.h
+ * @file
  * @brief Implementation of the aithreadsafe namespace.
  *
  * Copyright (C) 2010, 2016  Carlo Wood.

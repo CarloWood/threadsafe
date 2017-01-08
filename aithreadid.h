@@ -1,5 +1,5 @@
 /**
- * @file aithreadid.h
+ * @file
  * @brief Declaration of AIThreadID.
  *
  * Copyright (C) 2015, 2016  Carlo Wood.

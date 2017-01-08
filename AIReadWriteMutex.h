@@ -1,5 +1,5 @@
 /**
- * @file AIReadWriteMutex.h
+ * @file
  * @brief Implementation of AIReadWriteMutex.
  *
  * Copyright (C) 2010, 2016  Carlo Wood.
