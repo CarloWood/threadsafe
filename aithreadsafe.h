@@ -620,7 +620,7 @@ struct OTAccessConst
     {
 #if THREADSAFE_DEBUG
       m_wrapper.m_ref++;
-      assert(is_single_threaded(wrapper.m_thread_id));
+      assert(aithreadid::is_single_threaded(wrapper.m_thread_id));
 #endif // THREADSAFE_DEBUG
     }
 

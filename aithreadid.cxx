@@ -32,4 +32,10 @@
 
 #include "aithreadid.h"
 
+namespace aithreadid
+{
+
 std::thread::id const s_main_thread_id = std::this_thread::get_id();
+std::thread::id const none;
+
+}

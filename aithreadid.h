@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Declaration of AIThreadID.
+ * @brief Declarations related to std::thread::id.
  *
  * Copyright (C) 2015 - 2017  Carlo Wood.
  *
@@ -30,12 +30,16 @@
  *   - Transfered copyright to Carlo Wood.
  */
 
-#ifndef AITHREADID
-#define AITHREADID
+#pragma once
 
 #include "utils/macros.h"
-
 #include <thread>
+
+namespace aithreadid
+{
+
+extern std::thread::id const none;
+extern std::thread::id const s_main_thread_id;
 
 // Debugging function.
 // Usage:
@@ -45,10 +49,15 @@ inline bool is_single_threaded(std::thread::id& thread_id)
 {
   if (AI_LIKELY(thread_id == std::this_thread::get_id()))
     return true;
-  bool const first_call = thread_id == std::thread::id();
+  bool const first_call = thread_id == none;
   if (AI_LIKELY(first_call))
     thread_id = std::this_thread::get_id();
   return first_call;
 }
 
-#endif // AITHREADID
+inline bool in_main_thread()
+{
+  return s_main_thread_id == std::this_thread::get_id();
+}
+
+} // namespace aithreadid
