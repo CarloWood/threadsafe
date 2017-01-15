@@ -32,7 +32,7 @@
  *     access to a const AIThreadSafeSimple.
  *
  *   2013/01/26
- *   - Added support for LLCondition to AIThreadSafeSimple.
+ *   - Added support for Condition to AIThreadSafeSimple.
  *
  *   2015/02/24
  *   - Moved code from Singularity to separate repository.
@@ -80,7 +80,7 @@
 // The typical declaration of a Wrapper object should involve a typedef.
 // For example:
 //
-// typedef aithreadsafe::Wrapper<MyData, aithreadsafe::policy::Primitive<std::mutex>> mydata_t;
+// typedef aithreadsafe::Wrapper<MyData, aithreadsafe::policy::Primitive<AIMutex>> mydata_t;
 // mydata_t data;
 //
 // After which the following access types can be used:

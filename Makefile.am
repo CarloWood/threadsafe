@@ -1,5 +1,7 @@
 AM_CPPFLAGS = -iquote $(top_srcdir)
 
+EXTRA_DIST = AIMutex.h AIRecursiveMutex.h Condition.h
+
 noinst_LTLIBRARIES = libthreadsafe.la
 bin_PROGRAMS = threadsafe_test readwritemutex_test
 
