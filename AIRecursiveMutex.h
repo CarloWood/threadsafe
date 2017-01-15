@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "AIMutex"
+#include "AIMutex.h"
 
 struct AIRecursiveMutexMutex {
   AIMutex m_mutex;

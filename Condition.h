@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include <AIMutex>
+#include "AIMutex.h"
 #include <condition_variable>
 
 namespace aithreadsafe
