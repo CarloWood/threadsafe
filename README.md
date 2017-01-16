@@ -110,11 +110,11 @@ would also define
 
 <pre>
 foobar_CXXFLAGS = @LIBCWD_FLAGS@
-foobar_LDADD = ../utils/libutils.la ../cwd/libcwd.la @LIBCWD_LIBS@
+foobar_LDADD = ../threadsafe/threadsafe.la ../utils/libutils.la ../cwd/libcwd.la @LIBCWD_LIBS@
 </pre>
 
-or whatever the path to `utils` is, to link with libutils, and
-assuming you'd also use the [cwd](https://github.com/CarloWood/cwd) submodule.
+or whatever the path to `threadsafe` etc. is, to link with the required submodules,
+libraries, and assuming you'd also use the [cwd](https://github.com/CarloWood/cwd) submodule.
 
 Finally, run
 
