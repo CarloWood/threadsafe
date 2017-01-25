@@ -31,7 +31,7 @@ namespace aithreadsafe
 
 class Condition : public AIMutex {
   private:
-    std::condition_variable m_condition;
+    std::condition_variable_any m_condition;
   public:
     void wait() { std::unique_lock<AIMutex> lk(*this); m_condition.wait(lk); }
     void signal() { m_condition.notify_one(); }

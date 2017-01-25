@@ -25,4 +25,30 @@
 
 #include <mutex>
 
-using AIMutex = std::mutex;
+class AIMutex {
+  protected:
+    std::mutex m_mutex;
+    std::thread::id m_id;
+
+  public:
+    void lock()
+    {
+      m_mutex.lock();
+      m_id = std::this_thread::get_id();
+    }
+    bool try_lock()
+    {
+      bool success = m_mutex.try_lock();
+      if (success) m_id = std::this_thread::get_id();
+      return success;
+    }
+    void unlock()
+    {
+      m_mutex.unlock();
+      m_id = std::thread::id();
+    }
+    bool self_locked() const
+    {
+      return m_id == std::this_thread::get_id();
+    }
+};
