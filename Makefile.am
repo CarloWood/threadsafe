@@ -17,13 +17,13 @@ readwritemutex_test_SOURCES = \
 	AIReadWriteMutex_test.cxx \
 	AIReadWriteMutex.h
 
-libthreadsafe_la_CXXFLAGS = @LIBCWD_FLAGS@
+libthreadsafe_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 
-threadsafe_test_CXXFLAGS = @LIBCWD_FLAGS@
-threadsafe_test_LDADD = libthreadsafe.la ../utils/libutils.la ../cwd/libcwd.la @LIBCWD_LIBS@
+threadsafe_test_CXXFLAGS = @LIBCWD_R_FLAGS@
+threadsafe_test_LDADD = libthreadsafe.la ../utils/libutils_r.la ../cwd/libcwd_r.la @LIBCWD_R_LIBS@
 
-readwritemutex_test_CXXFLAGS = @LIBCWD_FLAGS@
-readwritemutex_test_LDADD = libthreadsafe.la ../utils/libutils.la ../cwd/libcwd.la @LIBCWD_LIBS@
+readwritemutex_test_CXXFLAGS = @LIBCWD_R_FLAGS@
+readwritemutex_test_LDADD = libthreadsafe.la ../utils/libutils_r.la ../cwd/libcwd_r.la @LIBCWD_R_LIBS@
 
 # --------------- Maintainer's Section
 
