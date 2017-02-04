@@ -1,4 +1,4 @@
-AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwd
+AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
 EXTRA_DIST = AIMutex.h AIRecursiveMutex.h Condition.h
 
@@ -19,11 +19,9 @@ readwritemutex_test_SOURCES = \
 
 libthreadsafe_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 
-threadsafe_test_CXXFLAGS = @LIBCWD_R_FLAGS@
-threadsafe_test_LDADD = libthreadsafe.la ../utils/libutils_r.la ../cwd/libcwd_r.la @LIBCWD_R_LIBS@
+threadsafe_test_LDADD = libthreadsafe.la ../utils/libutils_r.la ../cwds/libcwds_r.la
 
-readwritemutex_test_CXXFLAGS = @LIBCWD_R_FLAGS@
-readwritemutex_test_LDADD = libthreadsafe.la ../utils/libutils_r.la ../cwd/libcwd_r.la @LIBCWD_R_LIBS@
+readwritemutex_test_LDADD = libthreadsafe.la ../utils/libutils_r.la ../cwds/libcwds_r.la
 
 # --------------- Maintainer's Section
 

@@ -109,12 +109,11 @@ bin_PROGRAMS = foobar
 would also define
 
 <pre>
-foobar_CXXFLAGS = @LIBCWD_R_FLAGS@
-foobar_LDADD = ../threadsafe/threadsafe.la ../utils/libutils_r.la ../cwd/libcwd_r.la @LIBCWD_R_LIBS@
+foobar_LDADD = ../threadsafe/threadsafe.la ../utils/libutils_r.la ../cwds/libcwds_r.la
 </pre>
 
 or whatever the path to `threadsafe` etc. is, to link with the required submodules,
-libraries, and assuming you'd also use the [cwd](https://github.com/CarloWood/cwd) submodule.
+libraries, and assuming you'd also use the [cwds](https://github.com/CarloWood/cwds) submodule.
 
 Finally, run
 
