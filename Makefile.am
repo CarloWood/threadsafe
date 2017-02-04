@@ -1,4 +1,4 @@
-AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
+AM_CPPFLAGS = -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
 EXTRA_DIST = AIMutex.h AIRecursiveMutex.h Condition.h
 
