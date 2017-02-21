@@ -33,7 +33,7 @@ class Condition : public AIMutex {
   private:
     std::condition_variable_any m_condition;
   public:
-    void wait() { std::unique_lock<AIMutex> lk(*this); m_condition.wait(lk); }
+    void wait() { ASSERT(self_locked()); m_condition.wait(*this); }
     void signal() { m_condition.notify_one(); }
 };
 

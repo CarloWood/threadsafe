@@ -24,6 +24,7 @@
 #pragma once
 
 #include <mutex>
+#include "debug.h"
 
 class AIMutex {
   protected:
@@ -33,11 +34,15 @@ class AIMutex {
   public:
     void lock()
     {
+      // AIMutex is not recursive.
+      ASSERT(m_id != std::this_thread::get_id());
       m_mutex.lock();
       m_id = std::this_thread::get_id();
     }
     bool try_lock()
     {
+      // AIMutex is not recursive.
+      ASSERT(m_id != std::this_thread::get_id());
       bool success = m_mutex.try_lock();
       if (success) m_id = std::this_thread::get_id();
       return success;
