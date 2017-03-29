@@ -77,9 +77,9 @@ struct Foo {
 #define TEST_READWRITE 1
 
 #if TEST_READWRITE
-typedef Wrapper<Foo, policy::ReadWrite<TestRWMutex>> foo_t;
+using foo_t = Wrapper<Foo, policy::ReadWrite<TestRWMutex>>;
 #else
-typedef Wrapper<Foo, policy::Primitive<TestMutex>> foo_t;
+using foo_t = Wrapper<Foo, policy::Primitive<TestMutex>>;
 #endif
 
 // Hack access to TestRWMutex.
@@ -196,9 +196,9 @@ int main()
 
   // ThreadSafe compile tests.
   struct A { int x; };
-  typedef Wrapper<A, policy::OneThread> onethread_t;
-  typedef Wrapper<A, policy::Primitive<std::mutex>> primitive_t;
-  typedef Wrapper<A, policy::ReadWrite<AIReadWriteMutex>> readwrite_t;
+  using onethread_t = Wrapper<A, policy::OneThread>;
+  using primitive_t = Wrapper<A, policy::Primitive<std::mutex>>;
+  using readwrite_t = Wrapper<A, policy::ReadWrite<AIReadWriteMutex>>;
 
   onethread_t onethread;
   primitive_t primitive;

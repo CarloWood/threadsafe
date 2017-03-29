@@ -22,7 +22,7 @@ that has read/write protection, one could do:
 
 ```C++
 using namespace aithreadsafe;
-typedef Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>> foo_t;
+using foo_t = Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>>;
 
 // Create an object Foo, AIReadWriteMutex pair. Foo will be inaccessible.
 foo_t foo;

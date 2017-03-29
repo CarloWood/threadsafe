@@ -77,10 +77,10 @@
 // read-only access and read/write access, even for the primitive (and
 // one thread) policies.
 //
-// The typical declaration of a Wrapper object should involve a typedef.
+// The typical declaration of a Wrapper object should involve a type alias.
 // For example:
 //
-// typedef aithreadsafe::Wrapper<MyData, aithreadsafe::policy::Primitive<AIMutex>> mydata_t;
+// using mydata_t = aithreadsafe::Wrapper<MyData, aithreadsafe::policy::Primitive<AIMutex>>;
 // mydata_t data;
 //
 // After which the following access types can be used:
@@ -172,7 +172,7 @@ class Bits
  *
  * <code>
  * class Foo { public: Foo(int, int); };	// Some user defined type.
- * typedef aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>> foo_t;	// Wrapper type for Foo.
+ * using foo_t = aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>>;	// Wrapper type for Foo.
  * foo_t foo(2, 3);				// Instantiation of a Foo(2, 3).
  *
  * {
@@ -212,7 +212,7 @@ class Bits
  * For example,
  *
  * <code>
- * typedef aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>> foo_t;
+ * using foo_t = aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>>;
  * foo_t foo;
  *
  * void f(foo_t::rat& foo_r)		// Sometimes needs to write to foo_r.
@@ -340,14 +340,14 @@ template<typename T, typename POLICY_MUTEX, size_t align = alignof(T), size_t bl
 class Wrapper : public aithreadsafe::Bits<T, align, blocksize>, public POLICY_MUTEX
 {
   public:
-    typedef T data_type;
-    typedef POLICY_MUTEX policy_type;
+    using data_type = T;
+    using policy_type = POLICY_MUTEX;
 
     // The access types.
-    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::const_read_access_type crat;
-    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::read_access_type       rat;
-    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_access_type      wat;
-    typedef typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_to_read_carry    w2rCarry;
+    using crat = typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::const_read_access_type;
+    using rat = typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::read_access_type;
+    using wat = typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_access_type;
+    using w2rCarry = typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_to_read_carry;
 
     // Only these may access the object (through ptr()).
     friend crat;
@@ -486,7 +486,7 @@ template<class WRAPPER>
 struct ReadAccess : public ConstReadAccess<WRAPPER>
 {
   public:
-    typedef typename ConstReadAccess<WRAPPER>::state_type state_type;
+    using state_type = typename ConstReadAccess<WRAPPER>::state_type;
     using ConstReadAccess<WRAPPER>::readlocked;
     using ConstReadAccess<WRAPPER>::carrylocked;
 
@@ -681,10 +681,10 @@ class ReadWrite
     template<class WRAPPER>
     struct access_types
     {
-      typedef ConstReadAccess<WRAPPER> const_read_access_type;
-      typedef ReadAccess<WRAPPER> read_access_type;
-      typedef WriteAccess<WRAPPER> write_access_type;
-      typedef Write2ReadCarry<WRAPPER> write_to_read_carry;
+      using const_read_access_type = ConstReadAccess<WRAPPER>;
+      using read_access_type = ReadAccess<WRAPPER>;
+      using write_access_type = WriteAccess<WRAPPER>;
+      using write_to_read_carry = Write2ReadCarry<WRAPPER>;
     };
 
     template<class WRAPPER> friend struct ConstReadAccess;
@@ -704,10 +704,10 @@ class Primitive
     template<class WRAPPER>
     struct access_types
     {
-      typedef AccessConst<WRAPPER> const_read_access_type;
-      typedef Access<WRAPPER> read_access_type;
-      typedef Access<WRAPPER> write_access_type;
-      typedef unsupported_w2rCarry<typename WRAPPER::policy_type> write_to_read_carry;
+      using const_read_access_type = AccessConst<WRAPPER>;
+      using read_access_type = Access<WRAPPER>;
+      using write_access_type = Access<WRAPPER>;
+      using write_to_read_carry = unsupported_w2rCarry<typename WRAPPER::policy_type>;
     };
 
     template<class WRAPPER> friend struct AccessConst;
@@ -722,10 +722,10 @@ class OneThread
     template<class WRAPPER>
     struct access_types
     {
-      typedef OTAccessConst<WRAPPER> const_read_access_type;
-      typedef OTAccess<WRAPPER> read_access_type;
-      typedef OTAccess<WRAPPER> write_access_type;
-      typedef unsupported_w2rCarry<typename WRAPPER::policy_type> write_to_read_carry;
+      using const_read_access_type = OTAccessConst<WRAPPER>;
+      using read_access_type = OTAccess<WRAPPER>;
+      using write_access_type = OTAccess<WRAPPER>;
+      using write_to_read_carry = unsupported_w2rCarry<typename WRAPPER::policy_type>;
     };
 
 #if THREADSAFE_DEBUG
