@@ -125,7 +125,11 @@
 #include <condition_variable>
 #include <boost/math/common_factor.hpp>
 
-#define THREADSAFE_DEBUG defined(CWDEBUG)
+#ifdef CWDEBUG
+#define THREADSAFE_DEBUG 1
+#else
+#define THREADSAFE_DEBUG 0
+#endif
 
 namespace aithreadsafe
 {
