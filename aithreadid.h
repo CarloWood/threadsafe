@@ -44,7 +44,7 @@ extern std::thread::id const s_main_thread_id;
 // Debugging function.
 // Usage:
 //   static std::thread::id s_id;
-//   assert(is_single_threaded(s_id));	// Fails if more than one thread executes this line.
+//   assert(aithreadid::is_single_threaded(s_id));	// Fails if more than one thread executes this line.
 inline bool is_single_threaded(std::thread::id& thread_id)
 {
   if (AI_LIKELY(thread_id == std::this_thread::get_id()))
