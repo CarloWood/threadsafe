@@ -404,50 +404,54 @@ struct ConstReadAccess
     };
 
     //! Construct a ConstReadAccess from a constant Wrapper.
-    ConstReadAccess(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER&>(wrapper)), m_state(readlocked)
+    ConstReadAccess(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER*>(&wrapper)), m_state(readlocked)
     {
 #if THREADSAFE_DEBUG
-      m_wrapper.m_ref++;
+      m_wrapper->m_ref++;
 #endif // THREADSAFE_DEBUG
-      m_wrapper.m_read_write_mutex.rdlock();
+      m_wrapper->m_read_write_mutex.rdlock();
     }
 
     //! Destruct the Access object.
     // These should never be dynamically allocated, so there is no need to make this virtual.
     ~ConstReadAccess()
     {
+      if (AI_UNLIKELY(!m_wrapper))
+        return;
       if (m_state == readlocked)
-	m_wrapper.m_read_write_mutex.rdunlock();
+	m_wrapper->m_read_write_mutex.rdunlock();
       else if (m_state == writelocked)
-	m_wrapper.m_read_write_mutex.wrunlock();
+	m_wrapper->m_read_write_mutex.wrunlock();
       else if (m_state == read2writelocked)
-	m_wrapper.m_read_write_mutex.wr2rdlock();
+	m_wrapper->m_read_write_mutex.wr2rdlock();
 #if THREADSAFE_DEBUG
-      m_wrapper.m_ref--;
+      m_wrapper->m_ref--;
 #endif // THREADSAFE_DEBUG
     }
 
     //! Access the underlaying object for read access.
-    typename WRAPPER::data_type const* operator->() const { return m_wrapper.ptr(); }
+    typename WRAPPER::data_type const* operator->() const { return m_wrapper->ptr(); }
 
     //! Access the underlaying object for read access.
-    typename WRAPPER::data_type const& operator*() const { return *m_wrapper.ptr(); }
+    typename WRAPPER::data_type const& operator*() const { return *m_wrapper->ptr(); }
 
   protected:
     //! Constructor used by ReadAccess.
-    ConstReadAccess(WRAPPER& wrapper, state_type state) : m_wrapper(wrapper), m_state(state)
+    ConstReadAccess(WRAPPER& wrapper, state_type state) : m_wrapper(&wrapper), m_state(state)
     {
 #if THREADSAFE_DEBUG
-      m_wrapper.m_ref++;
+      m_wrapper->m_ref++;
 #endif // THREADSAFE_DEBUG
     }
 
-    WRAPPER& m_wrapper;		//!< Reference to the object that we provide access to.
+    WRAPPER* m_wrapper;		//!< Pointer to the object that we provide access to.
     state_type const m_state;	//!< The lock state that m_wrapper is in.
 
-  private:
     // Disallow copy constructing directly.
-    ConstReadAccess(ConstReadAccess const&);
+    ConstReadAccess(ConstReadAccess const&) = delete;
+
+    // Move constructor.
+    ConstReadAccess(ConstReadAccess&& rvalue) : m_wrapper(rvalue.m_wrapper) { rvalue.m_wrapper = nullptr; }
 };
 
 template<class WRAPPER> struct ReadAccess;
@@ -497,7 +501,7 @@ struct ReadAccess : public ConstReadAccess<WRAPPER>
     //! Construct a ReadAccess from a non-constant Wrapper.
     ReadAccess(WRAPPER& wrapper) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
     {
-      this->m_wrapper.m_read_write_mutex.rdlock();
+      this->m_wrapper->m_read_write_mutex.rdlock();
     }
 
     //! Construct a ReadAccess from a Write2ReadCarry object containing an read locked Wrapper. Upon destruction leave the Wrapper read locked.
@@ -526,15 +530,15 @@ struct WriteAccess : public ReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::write2writelocked;
 
     //! Construct a WriteAccess from a non-constant Wrapper.
-    WriteAccess(WRAPPER& wrapper) : ReadAccess<WRAPPER>(wrapper, writelocked) { this->m_wrapper.m_read_write_mutex.wrlock();}
+    WriteAccess(WRAPPER& wrapper) : ReadAccess<WRAPPER>(wrapper, writelocked) { this->m_wrapper->m_read_write_mutex.wrlock();}
 
     //! Promote read access to write access.
     explicit WriteAccess(ReadAccess<WRAPPER>& access) :
-        ReadAccess<WRAPPER>(access.m_wrapper, (access.m_state == readlocked) ? read2writelocked : write2writelocked)
+        ReadAccess<WRAPPER>(*access.m_wrapper, (access.m_state == readlocked) ? read2writelocked : write2writelocked)
     {
       if (this->m_state == read2writelocked)
       {
-	this->m_wrapper.m_read_write_mutex.rd2wrlock();
+	this->m_wrapper->m_read_write_mutex.rd2wrlock();
       }
     }
 
@@ -543,14 +547,14 @@ struct WriteAccess : public ReadAccess<WRAPPER>
     {
       assert(!w2rc.m_used); // Always pass a w2rCarry to the wat first. There can only be one wat.
       w2rc.m_used = true;
-      this->m_wrapper.m_read_write_mutex.wrlock();
+      this->m_wrapper->m_read_write_mutex.wrlock();
     }
 
     //! Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type* operator->() const { return this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
 
     //! Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
 };
 
 /**
@@ -560,39 +564,44 @@ template<class WRAPPER>
 struct AccessConst
 {
     //! Construct a AccessConst from a constant Wrapper.
-    AccessConst(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER&>(wrapper))
+    AccessConst(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER*>(&wrapper))
     {
 #if THREADSAFE_DEBUG
-      m_wrapper.m_ref++;
+      m_wrapper->m_ref++;
 #endif // THREADSAFE_DEBUG
-      this->m_wrapper.m_primitive_mutex.lock();
+      this->m_wrapper->m_primitive_mutex.lock();
     }
 
     //! Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type const* operator->() const { return this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type const* operator->() const { return this->m_wrapper->ptr(); }
 
     //! Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper->ptr(); }
 
     ~AccessConst()
     {
+      if (AI_LIKELY(this->m_wrapper))
+      {
 #if THREADSAFE_DEBUG
-      m_wrapper.m_ref--;
+        this->m_wrapper->m_ref--;
 #endif // THREADSAFE_DEBUG
-      this->m_wrapper.m_primitive_mutex.unlock();
+        this->m_wrapper->m_primitive_mutex.unlock();
+      }
     }
 
     // If m_primitive_mutex is a Condition, then this can be used to wait for a signal.
-    void wait() { this->m_wrapper.m_primitive_mutex.wait(); }
+    void wait() { this->m_wrapper->m_primitive_mutex.wait(); }
     // If m_primitive_mutex is a Condition then this can be used to wake up the waiting thread.
-    void signal() { this->m_wrapper.m_primitive_mutex.signal(); }
+    void signal() { this->m_wrapper->m_primitive_mutex.signal(); }
 
   protected:
-    WRAPPER& m_wrapper;		//!< Reference to the object that we provide access to.
+    WRAPPER* m_wrapper;		//!< Pointer to the object that we provide access to.
 
-  private:
     // Disallow copy constructing directly.
-    AccessConst(AccessConst const&);
+    AccessConst(AccessConst const&) = delete;
+
+    // Move constructor.
+    AccessConst(AccessConst&& rvalue) : m_wrapper(rvalue.m_wrapper) { rvalue.m_wrapper = nullptr; }
 };
 
 /**
@@ -606,10 +615,10 @@ struct Access : public AccessConst<WRAPPER>
     Access(WRAPPER& wrapper) : AccessConst<WRAPPER>(wrapper) { }
 
     //! Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type* operator->() const { return this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
 
     //! Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
 };
 
 /**
@@ -620,10 +629,10 @@ struct OTAccessConst
 {
   public:
     //! Construct a OTAccessConst from a constant Wrapper.
-    OTAccessConst(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER&>(wrapper))
+    OTAccessConst(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER*>(&wrapper))
     {
 #if THREADSAFE_DEBUG
-      m_wrapper.m_ref++;
+      m_wrapper->m_ref++;
       assert(aithreadid::is_single_threaded(wrapper.m_thread_id));
 #endif // THREADSAFE_DEBUG
     }
@@ -631,22 +640,25 @@ struct OTAccessConst
 #if THREADSAFE_DEBUG
     ~OTAccessConst()
     {
-      m_wrapper.m_ref--;
+      if (this->m_wrapper)
+        m_wrapper->m_ref--;
     }
 #endif // THREADSAFE_DEBUG
 
     //! Access the underlaying object for read access.
-    typename WRAPPER::data_type const* operator->() const { return this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type const* operator->() const { return this->m_wrapper->ptr(); }
 
     //! Access the underlaying object for read write access.
-    typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper->ptr(); }
 
   protected:
-    WRAPPER& m_wrapper;		//!< Reference to the object that we provide access to.
+    WRAPPER* m_wrapper;		//!< Pointer to the object that we provide access to.
 
-  private:
     // Disallow copy constructing directly.
-    OTAccessConst(OTAccessConst const&);
+    OTAccessConst(OTAccessConst const&) = delete;
+
+    // Move constructor.
+    OTAccessConst(OTAccessConst&& rvalue) : m_wrapper(rvalue.m_wrapper) { rvalue.m_wrapper = nullptr; }
 };
 
 /**
@@ -660,10 +672,10 @@ struct OTAccess : public OTAccessConst<WRAPPER>
     OTAccess(WRAPPER& wrapper) : OTAccessConst<WRAPPER>(wrapper) { }
 
     //! Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type* operator->() const { return this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
 
     //! Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper.ptr(); }
+    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
 };
 
 namespace policy

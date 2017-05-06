@@ -116,9 +116,9 @@ bool is_writelocked(foo_t const& wrapper)
 class AccessWrapper : public foo_t::crat
 {
   public:
-    bool is_unlocked() const { return ::is_unlocked(this->m_wrapper); }
-    bool is_readlocked() const { return ::is_readlocked(this->m_wrapper); }
-    bool is_writelocked() const { return ::is_writelocked(this->m_wrapper); }
+    bool is_unlocked() const { return ::is_unlocked(*this->m_wrapper); }
+    bool is_readlocked() const { return ::is_readlocked(*this->m_wrapper); }
+    bool is_writelocked() const { return ::is_writelocked(*this->m_wrapper); }
 };
 
 bool is_unlocked(foo_t::crat const& access)
