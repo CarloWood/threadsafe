@@ -77,9 +77,9 @@ struct Foo {
 #define TEST_READWRITE 1
 
 #if TEST_READWRITE
-typedef Wrapper<Foo, policy::ReadWrite<TestRWMutex>> foo_t;
+using foo_t = Wrapper<Foo, policy::ReadWrite<TestRWMutex>>;
 #else
-typedef Wrapper<Foo, policy::Primitive<TestMutex>> foo_t;
+using foo_t = Wrapper<Foo, policy::Primitive<TestMutex>>;
 #endif
 
 // Hack access to TestRWMutex.
@@ -116,9 +116,9 @@ bool is_writelocked(foo_t const& wrapper)
 class AccessWrapper : public foo_t::crat
 {
   public:
-    bool is_unlocked() const { return ::is_unlocked(this->m_wrapper); }
-    bool is_readlocked() const { return ::is_readlocked(this->m_wrapper); }
-    bool is_writelocked() const { return ::is_writelocked(this->m_wrapper); }
+    bool is_unlocked() const { return ::is_unlocked(*this->m_wrapper); }
+    bool is_readlocked() const { return ::is_readlocked(*this->m_wrapper); }
+    bool is_writelocked() const { return ::is_writelocked(*this->m_wrapper); }
 };
 
 bool is_unlocked(foo_t::crat const& access)
@@ -196,9 +196,9 @@ int main()
 
   // ThreadSafe compile tests.
   struct A { int x; };
-  typedef Wrapper<A, policy::OneThread> onethread_t;
-  typedef Wrapper<A, policy::Primitive<std::mutex>> primitive_t;
-  typedef Wrapper<A, policy::ReadWrite<AIReadWriteMutex>> readwrite_t;
+  using onethread_t = Wrapper<A, policy::OneThread>;
+  using primitive_t = Wrapper<A, policy::Primitive<std::mutex>>;
+  using readwrite_t = Wrapper<A, policy::ReadWrite<AIReadWriteMutex>>;
 
   onethread_t onethread;
   primitive_t primitive;
