@@ -44,7 +44,7 @@ void run()
     m.wrlock();
     add(1);
     m.wrunlock();
-    for(int tries = 1;; ++tries)
+    for (int tries = 1;; ++tries)
     {
       std::this_thread::yield();
       m.rdlock();
@@ -54,7 +54,7 @@ void run()
       {
 	m.rd2wrlock();
       }
-      catch(std::exception const&)
+      catch (std::exception const&)
       {
 	// Failed to obtain the write lock because another thread is attempting
 	// to convert its read lock into a write lock.
