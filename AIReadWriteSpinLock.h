@@ -57,7 +57,7 @@ class AIReadWriteSpinLock
 	// Next we're going to wait until m_state becomes positive again.
 	read_locked = false;
 	std::unique_lock<std::mutex> lk(m_cv_mutex);
-	m_cv.wait(lk, [&] {
+	m_cv.wait(lk, [&](){
 	  int expected = 0;
 	  read_locked = std::atomic_compare_exchange_weak_explicit(&m_state, &expected, 1, std::memory_order_relaxed, std::memory_order_relaxed);
 	  return read_locked || (m_state.load(std::memory_order_relaxed) >= 0);
@@ -79,14 +79,14 @@ class AIReadWriteSpinLock
         if (state > 0)
         {
           // Read locked. Spin lock until all readers are done.
-          while (m_state.load(std::memory_order_relaxed) > -max_concurrent_accesses);
+          while (m_state.load(std::memory_order_relaxed) % max_concurrent_accesses != 0);
           break;
         }
         else (state < 0)
         {
           // Write locked. Wait for other write-lock to be released.
           std::atomic_fetch_add_explicit(&m_state, max_concurrent_accesses, std::memory_order_relaxed);
-          std::unique_lock<std::mutex> lk(m);
+          std::unique_lock<std::mutex> lk(m_cv_mutex);
           m_cv.wait(lk, [this](){ return m_state.load(std::memory_order_relaxed) >= 0; });
         }
       }
