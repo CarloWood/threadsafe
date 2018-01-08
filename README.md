@@ -11,7 +11,7 @@ providing C++ utilities for larger projects, including:
 * Several utilities like <tt>is_single_threaded</tt>.
 
 The root project should be using
-[autotools](https://en.wikipedia.org/wiki/GNU_Build_System autotools),
+[autotools](https://en.wikipedia.org/wiki/GNU_Build_System_autotools),
 [cwm4](https://github.com/CarloWood/cwm4) and
 [libcwd](https://github.com/CarloWood/libcwd).
 
