@@ -2,7 +2,7 @@
  * @file
  * @brief Implementation of AIReadWriteSpinLock.
  *
- * Copyright (C) 2017  Carlo Wood.
+ * Copyright (C) 2017, 2018  Carlo Wood.
  *
  * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
  * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
@@ -24,6 +24,7 @@
 #pragma once
 
 #include "utils/macros.h"
+#include "debug.h"
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
@@ -60,7 +61,7 @@ class AIReadWriteSpinLock
 	m_cv.wait(lk, [&](){
 	  int expected = 0;
 	  read_locked = std::atomic_compare_exchange_weak_explicit(&m_state, &expected, 1, std::memory_order_relaxed, std::memory_order_relaxed);
-	  return read_locked || (m_state.load(std::memory_order_relaxed) >= 0);
+	  return read_locked || m_state.load(std::memory_order_relaxed) >= 0;
 	});
       }
       while (!read_locked); // Try again if didn't obtain a read lock yet.
@@ -73,16 +74,17 @@ class AIReadWriteSpinLock
 
     void wrlock()
     {
-      for (;;)
+      int state;
+      do
       {
-        int state = std::atomic_fetch_sub_explicit(&m_state, max_concurrent_accesses, std::memory_order_relaxed);
+        state = std::atomic_fetch_sub_explicit(&m_state, max_concurrent_accesses, std::memory_order_relaxed);
         if (state > 0)
         {
           // Read locked. Spin lock until all readers are done.
           while (m_state.load(std::memory_order_relaxed) % max_concurrent_accesses != 0);
           break;
         }
-        else (state < 0)
+        else if (state < 0)
         {
           // Write locked. Wait for other write-lock to be released.
           std::atomic_fetch_add_explicit(&m_state, max_concurrent_accesses, std::memory_order_relaxed);
@@ -90,6 +92,7 @@ class AIReadWriteSpinLock
           m_cv.wait(lk, [this](){ return m_state.load(std::memory_order_relaxed) >= 0; });
         }
       }
+      while (state < 0);
     }
 
     void rd2wrlock()
