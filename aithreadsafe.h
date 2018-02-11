@@ -451,7 +451,7 @@ struct ConstReadAccess
     ConstReadAccess(ConstReadAccess const&) = delete;
 
     // Move constructor.
-    ConstReadAccess(ConstReadAccess&& rvalue) : m_wrapper(rvalue.m_wrapper) { rvalue.m_wrapper = nullptr; }
+    ConstReadAccess(ConstReadAccess&& rvalue) : m_wrapper(rvalue.m_wrapper), m_state(rvalue.m_state) { rvalue.m_wrapper = nullptr; }
 };
 
 template<class WRAPPER> struct ReadAccess;
