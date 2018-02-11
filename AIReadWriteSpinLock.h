@@ -33,7 +33,7 @@
 class AIReadWriteSpinLock
 {
   public:
-    AIReadWriteSpinLock() { }
+    AIReadWriteSpinLock() : m_state(0) { }
 
   private:
     std::atomic_int m_state;    // < 0: write locked, 0: unlocked, > 0: read locked.
