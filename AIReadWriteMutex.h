@@ -59,7 +59,7 @@ class AIReadWriteMutex
     void rdlock()
     {
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
-      m_condition_no_writer_left.wait(lk, [&]{return m_readers_count >= 0;});		// Wait till m_readers_count is no longer -1.
+      m_condition_no_writer_left.wait(lk, [this]{return m_readers_count >= 0;});	// Wait till m_readers_count is no longer -1.
       ++m_readers_count;								// One more reader.
     }
 
@@ -86,7 +86,7 @@ class AIReadWriteMutex
     {
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
       ++m_waiting_writers;								// Stop readers from being woken up.
-      m_condition_unlocked.wait(lk, [&]{return m_readers_count == 0;});			// Wait untill m_readers_count is 0 (nobody else has the lock).
+      m_condition_unlocked.wait(lk, [this]{return m_readers_count == 0;});		// Wait untill m_readers_count is 0 (nobody else has the lock).
       --m_waiting_writers;
       m_readers_count = -1;								// We are a writer now.
     }
@@ -107,7 +107,7 @@ class AIReadWriteMutex
 	throw std::exception();
       }
       ++m_waiting_writers;								// Stop readers from being woken up.
-      m_condition_one_reader_left.wait(lk, [&]{return m_readers_count == 1;});		// Wait till m_readers_count is 1 (only this thead has its read lock).
+      m_condition_one_reader_left.wait(lk, [this]{return m_readers_count == 1;});	// Wait till m_readers_count is 1 (only this thead has its read lock).
       --m_waiting_writers;
       m_readers_count = -1;								// We are a writer now.
       if (--m_rd2wr_count == 0)
@@ -118,7 +118,7 @@ class AIReadWriteMutex
     {
       std::this_thread::yield();
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
-      m_condition_rd2wr_count_zero.wait(lk, [&]{return m_rd2wr_count == 0;});
+      m_condition_rd2wr_count_zero.wait(lk, [this]{return m_rd2wr_count == 0;});
     }
 
     void wrunlock()
