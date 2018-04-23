@@ -594,6 +594,26 @@ struct AccessConst
     // If m_primitive_mutex is a Condition then this can be used to wake up the waiting thread.
     void signal() { this->m_wrapper->m_primitive_mutex.signal(); }
 
+    // Experimental unlock/relock.
+    void unlock()
+    {
+#if THREADSAFE_DEBUG
+      this->m_wrapper->m_ref--;
+#endif // THREADSAFE_DEBUG
+      this->m_wrapper->m_primitive_mutex.unlock();
+      this->m_wrapper = nullptr;
+    }
+
+    // Relock a previously unlocked access object.
+    void relock(WRAPPER const& wrapper)
+    {
+      m_wrapper = const_cast<WRAPPER*>(&wrapper);
+#if THREADSAFE_DEBUG
+      m_wrapper->m_ref++;
+#endif // THREADSAFE_DEBUG
+      this->m_wrapper->m_primitive_mutex.lock();
+    }
+
   protected:
     WRAPPER* m_wrapper;		//!< Pointer to the object that we provide access to.
 

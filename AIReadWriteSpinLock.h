@@ -120,14 +120,14 @@ class AIReadWriteSpinLock
 
     void wrunlock()
     {
-      std::unique_lock<std::mutex> lk(m_cv_mutex);
+      std::lock_guard<std::mutex> lk(m_cv_mutex);
       std::atomic_fetch_add_explicit(&m_state, max_concurrent_accesses, std::memory_order_relaxed);
       m_cv.notify_all();
     }
 
     void wr2rdlock()
     {
-      std::unique_lock<std::mutex> lk(m_cv_mutex);
+      std::lock_guard<std::mutex> lk(m_cv_mutex);
       std::atomic_fetch_add_explicit(&m_state, max_concurrent_accesses + 1, std::memory_order_relaxed);
       m_cv.notify_all();
     }
