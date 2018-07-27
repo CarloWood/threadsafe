@@ -708,7 +708,8 @@ template<typename T> struct unsupported_w2rCarry
       "* The Primitive/OneThread policy does not support w2rCarry,\n"
       "* it makes no sense and would require extra space and cpu cycles to make it work.\n"
       "* Instead, of '{ foo_t::w2rCarry carry(foo); { foo_t::wat foo_rw(carry); ... } foo_t::rat foo_r(carry); ... }',\n"
-      "* just use    '{ foo_t::wat foo_rw(foo); ... }'\n"); };
+      "* just use    '{ foo_t::wat foo_rw(foo); ... }'\n");
+};
 
 template<class RWMUTEX>
 class ReadWrite
