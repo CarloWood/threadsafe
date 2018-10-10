@@ -375,12 +375,15 @@ class Wrapper : public aithreadsafe::Bits<T, align, blocksize>, public POLICY_MU
     std::atomic<int> m_ref;
 
   public:
-    // Can only be locked when there still exists an Access object that
-    // references this object and will access it upon destruction.
-    // If the assertion fails, make sure that such Access object is
-    // destructed before the deletion of this object.
     ~Wrapper()
     {
+      // Can only be locked when there still exists an Access object that
+      // references this object and will access it upon destruction.
+      // If the assertion fails, make sure that such Access object is
+      // destructed before the deletion of this object.
+      // If the assert happens after main, did you join all threads --
+      // that might still have such an Access object-- before leaving
+      // main()?
       assert(m_ref == 0);
     }
 #endif
