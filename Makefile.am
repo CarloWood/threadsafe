@@ -8,7 +8,7 @@ libthreadsafe_la_SOURCES = \
 	aithreadid.cxx \
 	aithreadid.h
 
-libthreadsafe_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@
+libthreadsafe_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 
 # --------------- Maintainer's Section
 
