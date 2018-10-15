@@ -30,6 +30,7 @@
  *   - Transfered copyright to Carlo Wood.
  */
 
+#include "sys.h"
 #include "aithreadid.h"
 
 namespace aithreadid
