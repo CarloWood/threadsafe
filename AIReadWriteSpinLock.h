@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "utils/macros.h"
+#include "utils/cpu_relax.h"
 #include "debug.h"
 #include <mutex>
 #include <condition_variable>
@@ -92,7 +92,13 @@ class AIReadWriteSpinLock
         if (state > 0)
         {
           // Read locked. Spin lock until all readers are done.
-          while (m_state.load(std::memory_order_relaxed) % max_concurrent_accesses != 0);
+          // Note that because this only reads, without trying to write anything -- because of the widespread use
+          // of MESI caching protocols -- this should cause the cache line for the lock to become "Shared" with no bus
+          // traffic while the CPU waits for the lock (on architectures with a cache per CPU).
+          // Nevertheless, we add a call to cpu_relax() in the loop because that is common practise and highly
+          // recommended anyway (by the intel user manual) for performance reasons.
+          while (m_state.load(std::memory_order_relaxed) % max_concurrent_accesses != 0)
+            cpu_relax();
           break;
         }
         else if (state < 0)
