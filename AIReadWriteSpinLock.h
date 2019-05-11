@@ -24,6 +24,7 @@
 #pragma once
 
 #include "utils/cpu_relax.h"
+#include "utils/macros.h"
 #include "debug.h"
 #include <mutex>
 #include <condition_variable>
