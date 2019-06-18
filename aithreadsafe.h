@@ -471,7 +471,7 @@ class Write2ReadCarry
     bool m_used;
 
   public:
-    Write2ReadCarry(WRAPPER& wrapper) : m_wrapper(wrapper), m_used(false)
+    explicit Write2ReadCarry(WRAPPER& wrapper) : m_wrapper(wrapper), m_used(false)
     {
 #if THREADSAFE_DEBUG
       m_wrapper.m_ref++;
@@ -502,7 +502,7 @@ struct ReadAccess : public ConstReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::carrylocked;
 
     //! Construct a ReadAccess from a non-constant Wrapper.
-    ReadAccess(WRAPPER& wrapper) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
+    explicit ReadAccess(WRAPPER& wrapper) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
     {
       this->m_wrapper->m_read_write_mutex.rdlock();
     }
@@ -533,7 +533,7 @@ struct WriteAccess : public ReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::write2writelocked;
 
     //! Construct a WriteAccess from a non-constant Wrapper.
-    WriteAccess(WRAPPER& wrapper) : ReadAccess<WRAPPER>(wrapper, writelocked) { this->m_wrapper->m_read_write_mutex.wrlock();}
+    explicit WriteAccess(WRAPPER& wrapper) : ReadAccess<WRAPPER>(wrapper, writelocked) { this->m_wrapper->m_read_write_mutex.wrlock();}
 
     //! Promote read access to write access.
     explicit WriteAccess(ReadAccess<WRAPPER>& access) :
@@ -635,7 +635,7 @@ struct Access : public AccessConst<WRAPPER>
 {
   public:
     //! Construct a Access from a non-constant Wrapper.
-    Access(WRAPPER& wrapper) : AccessConst<WRAPPER>(wrapper) { }
+    explicit Access(WRAPPER& wrapper) : AccessConst<WRAPPER>(wrapper) { }
 
     //! Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
@@ -692,7 +692,7 @@ struct OTAccess : public OTAccessConst<WRAPPER>
 {
   public:
     //! Construct a OTAccess from a non-constant Wrapper.
-    OTAccess(WRAPPER& wrapper) : OTAccessConst<WRAPPER>(wrapper) { }
+    explicit OTAccess(WRAPPER& wrapper) : OTAccessConst<WRAPPER>(wrapper) { }
 
     //! Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
