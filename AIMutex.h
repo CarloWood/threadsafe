@@ -24,36 +24,46 @@
 #pragma once
 
 #include <mutex>
+#include <atomic>
 #include "debug.h"
 
-class AIMutex {
-  protected:
-    std::mutex m_mutex;
-    std::thread::id m_id;
+class AIMutex
+{
+ protected:
+  std::mutex m_mutex;
+  std::atomic<std::thread::id> m_id;    // Must be atomic because of the access in is_self_locked().
+                                        // It is not possible to protect m_id with m_mutex in that function.
 
-  public:
-    void lock()
-    {
-      // AIMutex is not recursive.
-      ASSERT(m_id != std::this_thread::get_id());
-      m_mutex.lock();
-      m_id = std::this_thread::get_id();
-    }
-    bool try_lock()
-    {
-      // AIMutex is not recursive.
-      ASSERT(m_id != std::this_thread::get_id());
-      bool success = m_mutex.try_lock();
-      if (success) m_id = std::this_thread::get_id();
-      return success;
-    }
-    void unlock()
-    {
-      m_mutex.unlock();
-      m_id = std::thread::id();
-    }
-    bool self_locked() const
-    {
-      return m_id == std::this_thread::get_id();
-    }
+  // This is actually not REALLY required, but it would be very silly if a mutex would be used here.
+  static_assert(std::atomic<std::thread::id>::is_always_lock_free, "Get a real OS");
+
+ public:
+  void lock()
+  {
+    // AIMutex is not recursive.
+    ASSERT(m_id.load(std::memory_order_relaxed) != std::this_thread::get_id());
+    m_mutex.lock();
+    m_id.store(std::this_thread::get_id(), std::memory_order_relaxed);
+  }
+
+  bool try_lock()
+  {
+    // AIMutex is not recursive.
+    ASSERT(m_id.load(std::memory_order_relaxed) != std::this_thread::get_id());
+    bool success = m_mutex.try_lock();
+    if (success)
+      m_id.store(std::this_thread::get_id(), std::memory_order_relaxed);
+    return success;
+  }
+
+  void unlock()
+  {
+    m_id.store(std::thread::id(), std::memory_order_relaxed);
+    m_mutex.unlock();
+  }
+
+  bool is_self_locked() const
+  {
+    return m_id.load(std::memory_order_relaxed) == std::this_thread::get_id();
+  }
 };
