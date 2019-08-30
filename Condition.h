@@ -33,7 +33,7 @@ class Condition : public AIMutex {
   private:
     std::condition_variable_any m_condition;
   public:
-    void wait() { ASSERT(self_locked()); m_condition.wait(*this); }
+    void wait() { ASSERT(is_self_locked()); m_condition.wait(*this); }
     void signal() { m_condition.notify_one(); }
 };
 
