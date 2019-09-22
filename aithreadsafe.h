@@ -362,12 +362,12 @@ class Wrapper : public aithreadsafe::Bits<T, align, blocksize>, public POLICY_MU
   public:
     // Allow arbitrary parameters to be passed for construction.
     template<typename... ARGS>
-    Wrapper(ARGS... args)
+    Wrapper(ARGS&&... args)
 #if THREADSAFE_DEBUG
       : m_ref(0)
 #endif // THREADSAFE_DEBUG
     {
-      new (aithreadsafe::Bits<T, align, blocksize>::ptr()) T(args ...);
+      new (aithreadsafe::Bits<T, align, blocksize>::ptr()) T(std::forward<ARGS>(args)...);
     }
 
 #if THREADSAFE_DEBUG
@@ -407,12 +407,13 @@ struct ConstReadAccess
     };
 
     //! Construct a ConstReadAccess from a constant Wrapper.
-    ConstReadAccess(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER*>(&wrapper)), m_state(readlocked)
+    template<typename ...Args>
+    ConstReadAccess(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper)), m_state(readlocked)
     {
 #if THREADSAFE_DEBUG
       m_wrapper->m_ref++;
 #endif // THREADSAFE_DEBUG
-      m_wrapper->m_read_write_mutex.rdlock();
+      m_wrapper->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
     }
 
     //! Destruct the Access object.
@@ -502,9 +503,10 @@ struct ReadAccess : public ConstReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::carrylocked;
 
     //! Construct a ReadAccess from a non-constant Wrapper.
-    explicit ReadAccess(WRAPPER& wrapper) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
+    template<typename ...Args>
+    explicit ReadAccess(WRAPPER& wrapper, Args&&... args) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
     {
-      this->m_wrapper->m_read_write_mutex.rdlock();
+      this->m_wrapper->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
     }
 
     //! Construct a ReadAccess from a Write2ReadCarry object containing an read locked Wrapper. Upon destruction leave the Wrapper read locked.
@@ -533,7 +535,11 @@ struct WriteAccess : public ReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::write2writelocked;
 
     //! Construct a WriteAccess from a non-constant Wrapper.
-    explicit WriteAccess(WRAPPER& wrapper) : ReadAccess<WRAPPER>(wrapper, writelocked) { this->m_wrapper->m_read_write_mutex.wrlock();}
+    template<typename ...Args>
+    explicit WriteAccess(WRAPPER& wrapper, Args&&... args) : ReadAccess<WRAPPER>(wrapper, writelocked)
+    {
+      this->m_wrapper->m_read_write_mutex.wrlock(std::forward<Args>(args)...);
+    }
 
     //! Promote read access to write access.
     explicit WriteAccess(ReadAccess<WRAPPER>& access) :
@@ -567,12 +573,13 @@ template<class WRAPPER>
 struct AccessConst
 {
     //! Construct a AccessConst from a constant Wrapper.
-    AccessConst(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER*>(&wrapper))
+    template<typename ...Args>
+    AccessConst(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper))
     {
 #if THREADSAFE_DEBUG
       m_wrapper->m_ref++;
 #endif // THREADSAFE_DEBUG
-      this->m_wrapper->m_primitive_mutex.lock();
+      this->m_wrapper->m_primitive_mutex.lock(std::forward<Args>(args)...);
     }
 
     //! Access the underlaying object for (read and) write access.
@@ -635,7 +642,8 @@ struct Access : public AccessConst<WRAPPER>
 {
   public:
     //! Construct a Access from a non-constant Wrapper.
-    explicit Access(WRAPPER& wrapper) : AccessConst<WRAPPER>(wrapper) { }
+    template<typename ...Args>
+    explicit Access(WRAPPER& wrapper, Args&&... args) : AccessConst<WRAPPER>(wrapper, std::forward<Args>(args)...) { }
 
     //! Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
@@ -652,7 +660,8 @@ struct OTAccessConst
 {
   public:
     //! Construct a OTAccessConst from a constant Wrapper.
-    OTAccessConst(WRAPPER const& wrapper) : m_wrapper(const_cast<WRAPPER*>(&wrapper))
+    template<typename ...Args>
+    OTAccessConst(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper), std::forward<Args>(args)...)
     {
 #if THREADSAFE_DEBUG
       m_wrapper->m_ref++;
@@ -692,7 +701,8 @@ struct OTAccess : public OTAccessConst<WRAPPER>
 {
   public:
     //! Construct a OTAccess from a non-constant Wrapper.
-    explicit OTAccess(WRAPPER& wrapper) : OTAccessConst<WRAPPER>(wrapper) { }
+    template<typename ...Args>
+    explicit OTAccess(WRAPPER& wrapper, Args&&... args) : OTAccessConst<WRAPPER>(wrapper, std::forward<Args>(args)...) { }
 
     //! Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
