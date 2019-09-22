@@ -31,10 +31,26 @@ namespace aithreadsafe
 
 class Condition : public AIMutex {
   private:
-    std::condition_variable_any m_condition;
+    std::condition_variable_any m_condition_variable;
+    bool m_condition;
+
   public:
-    void wait() { ASSERT(is_self_locked()); m_condition.wait(*this); }
-    void signal() { m_condition.notify_one(); }
+    Condition() : m_condition(false) { }
+
+    void wait()
+    {
+      std::lock_guard<AIMutex> lock(*this);
+//      ASSERT(is_self_locked());
+      m_condition_variable.wait(*this, [this](){ return m_condition; });
+      m_condition = false;
+    }
+
+    void signal()
+    {
+      std::lock_guard<AIMutex> lock(*this);
+      m_condition = true;
+      m_condition_variable.notify_one();
+    }
 };
 
 } // namespace aithreadsafe
