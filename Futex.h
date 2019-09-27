@@ -39,17 +39,17 @@ class Futex
 {
   static_assert(std::atomic<T>::is_always_lock_free, "std::atomic<T> must be lock free.");
   static_assert(sizeof(T) == sizeof(std::atomic<T>), "Sanity check failure!");  // Implied by the previous static_assert.
-  static_assert(std::is_integral_v<T> && sizeof(T) >= 4, "T must be one of int32_t, uint32_t, int64_t or uint64_t.");
-  static_assert(utils::is_power_of_two(size_in_bytes), "size_in_bytes must be a power of two.");
-  static_assert(size_in_bytes >= sizeof(T), "size_in_bytes must be greater than or equal to the size of T.");
+  static_assert(std::is_integral_v<T> && sizeof(T) % sizeof(int32_t) == 0, "T must be an integral type with a size that is a multiple of 4 bytes.");
+  static_assert(utils::is_power_of_two(size_in_bytes) && size_in_bytes >= sizeof(T), "size_in_bytes must be a power of two that is greater than or equal to the size of T.");
 
-  static constexpr int align_size = size_in_bytes / sizeof(int32_t);
-  static constexpr int align_offset = (__BYTE_ORDER == __LITTLE_ENDIAN) ? 0 : align_size - 1;
+  static constexpr int word_size_in_ints = sizeof(T) / sizeof(int32_t);
+  static constexpr int padding_size_in_ints = size_in_bytes / sizeof(int32_t) - word_size_in_ints;
+  static constexpr int index_32bits_word = (__BYTE_ORDER == __LITTLE_ENDIAN) ? 0 : word_size_in_ints - 1;
 
  private:
-  [[gnu::always_inline]] int* futex_word_ptr()
+  [[gnu::always_inline]] int32_t* futex_word_ptr()
   {
-    return &m_align[align_offset];
+    return &m_int_array[index_32bits_word];
   }
 
   int futex(int futex_op, uint32_t val, uint32_t val3)
@@ -64,9 +64,12 @@ class Futex
   }
 
  protected:
-  union {
-    std::atomic<T> m_word;
-    int32_t m_align[align_size];
+  struct {
+    union {
+      std::atomic<T> m_word;
+      int32_t m_int_array[word_size_in_ints];
+    };
+    int32_t m_padding[padding_size_in_ints];
   };
 
   Futex(T word) : m_word(word) { }
