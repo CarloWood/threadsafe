@@ -102,7 +102,7 @@ class Futex
     return futex(FUTEX_WAIT_PRIVATE, expected, 0);
   }
 
-  int wake(uint32_t n_threads) noexcept
+  uint32_t wake(uint32_t n_threads) noexcept
   {
     // This operation wakes at most n_threads of the waiters that are
     // waiting (e.g., inside FUTEX_WAIT) on m_word.
@@ -115,14 +115,14 @@ class Futex
     return futex(FUTEX_WAKE_PRIVATE, n_threads, 0);
   }
 
-  int cmp_wake(uint32_t expected, uint32_t n_threads)
+  int32_t cmp_wake(uint32_t expected, uint32_t n_threads)
   {
     // See cmp_requeue. The idea is that this is the same as FUTEX_WAKE
     // but fails when m_word doesn't contain the value expected.
     return futex(FUTEX_CMP_REQUEUE_PRIVATE, n_threads, 0, *this, expected);
   }
 
-  int cmp_requeue(uint32_t expected, uint32_t n_threads, Futex& target, uint32_t target_limit) noexcept
+  int32_t cmp_requeue(uint32_t expected, uint32_t n_threads, Futex& target, uint32_t target_limit) noexcept
   {
     // This operation first checks whether the location m_word still
     // contains the value expected. If not, the operation fails immediately
@@ -140,13 +140,13 @@ class Futex
     return futex(FUTEX_CMP_REQUEUE_PRIVATE, n_threads, target_limit, target, expected);
   }
 
-  int requeue(uint32_t n_threads, Futex& target, uint32_t target_limit) noexcept
+  int32_t requeue(uint32_t n_threads, Futex& target, uint32_t target_limit) noexcept
   {
     // This operation performs the same task as FUTEX_CMP_REQUEUE except that no expected check is made.
     return futex(FUTEX_REQUEUE_PRIVATE, n_threads, target_limit, target, 0);
   }
 
-  int wake_op(uint32_t n_threads, Futex& futex2, uint32_t n_threads2, uint32_t val3) noexcept
+  uint32_t wake_op(uint32_t n_threads, Futex& futex2, uint32_t n_threads2, uint32_t val3) noexcept
   {
     // The operation and comparison that are to be performed are encoded in the bits of the argument val3.
     // Pictorially, the encoding is:
@@ -199,7 +199,7 @@ class Futex
     return futex(FUTEX_WAIT_BITSET_PRIVATE, expected, bit_mask);
   }
 
-  int wake_bitset(uint32_t n_threads, uint32_t bit_mask) noexcept
+  uint32_t wake_bitset(uint32_t n_threads, uint32_t bit_mask) noexcept
   {
     // This operation is the same as FUTEX_WAKE except that bit_mask
     // is used to provide a 32-bit bit mask to the kernel.
