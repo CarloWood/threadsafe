@@ -1,3 +1,28 @@
+/**
+ * @file
+ * @brief Implementation of Semaphore.
+ *
+ * Copyright (C) 2019 Carlo Wood.
+ *
+ * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
+ * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
 #include "threadsafe/Futex.h"
 #include "debug.h"
 
@@ -37,7 +62,7 @@ class Semaphore : public Futex<uint64_t>
   //
   // If there are waiting threads then (at most) n threads are woken up,
   // but with a single system call; each of which then tries to grab one
-  // the available tokens.
+  // of the available tokens.
   void post(uint32_t n = 1) noexcept
   {
     DoutEntering(dc::notice, "Semaphore::post(" << n << ")");
