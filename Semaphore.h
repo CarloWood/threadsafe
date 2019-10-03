@@ -85,68 +85,12 @@ class Semaphore : public Futex<uint64_t>
     }
   }
 
-  // Removes one token from the semaphore.
-  //
-  // If no token is available then the thread will block until it manages
-  // to grab a new token added with post(n).
-  void wait() noexcept
-  {
-    DoutEntering(dc::notice, "Semaphore::wait()");
-    uint64_t word = m_word.load(std::memory_order_relaxed);
-    for (;;)
-    {
-      uint64_t ntokens = word & tokens_mask;
-      // Is there a token available?
-      if (ntokens == 0)
-        break;
-      // Attempt the fast path of just decrementing the number of tokens with 1 and returning.
-      if (m_word.compare_exchange_weak(word, word - 1, std::memory_order_acquire))
-      {
-        Dout(dc::notice, "Successfully grabbed a token, " << (ntokens - 1) << " tokens and " << (word >> nwaiters_shift) << " waiters left.");
-        return;
-      }
-    }
-    // We are (likely) going to block. Add one to the number of waiters.
-    word = m_word.fetch_add(one_waiter, std::memory_order_relaxed) + one_waiter;
+  // Same as wait() but should only be called when (at least, very recently)
+  // there are no tokens so that we are very likely to go to sleep.
+  void slow_wait() noexcept;
 
-    // Wait for a token to be available. Retry until we can grab one.
-    for (;;)
-    {
-      // If there is no token available, block until a new token was added.
-      uint32_t ntokens = word & tokens_mask;
-      Dout(dc::notice, "Seeing " << ntokens << " tokens and " << (word >> nwaiters_shift) << " waiters.");
-      if (ntokens == 0)
-      {
-        // As of kernel 2.6.22 FUTEX_WAIT only returns with -1 when the syscall was
-        // interrupted by a signal. In that case errno should be set to EINTR.
-        // Linux kernels before 2.6.22 could also return EINTR upon a supurious wakeup,
-        // in which case it is also OK to just reenter wait() again.
-        [[maybe_unused]] int res;
-        while ((res = Futex<uint64_t>::wait(ntokens)) == -1 && errno != EAGAIN)
-          ;
-        // EAGAIN happens when the number of tokens was changed in the meantime.
-        // We (supuriously?) woke up or failed to go to sleep because the number of tokens changed.
-        // It is therefore not sure that there is a token for us. Refresh word and try again.
-        word = m_word.load(std::memory_order_relaxed);
-        Dout(dc::notice(res == 0), "Woke up! tokens = " << (word & tokens_mask) << "; waiters = " << (word >> nwaiters_shift));
-        // We woke up, try to again to get a token.
-      }
-      else
-      {
-        // (Try to) atomically grab a token and stop being a waiter.
-        if (m_word.compare_exchange_weak(word, word - one_waiter - 1, std::memory_order_acquire, std::memory_order_relaxed))
-        {
-          Dout(dc::notice, "Successfully obtained a token. Now " << (ntokens - 1) << " tokens and " << ((word - one_waiter) >> nwaiters_shift) << " waiters left.");
-          break;
-        }
-        // word was changed, try again.
-      }
-    }
-  }
-
-  bool try_wait() noexcept
+  bool fast_try_wait() noexcept
   {
-    DoutEntering(dc::notice, "Semaphore::try_wait()");
     uint64_t word = m_word.load(std::memory_order_relaxed);
     do
     {
@@ -161,6 +105,23 @@ class Semaphore : public Futex<uint64_t>
     // Token successfully grabbed.
     Dout(dc::notice, "Success, now " << ((word & tokens_mask) - 1) << " tokens left.");
     return true;
+  }
+
+  // Removes one token from the semaphore.
+  //
+  // If no token is available then the thread will block until it manages
+  // to grab a new token added with post(n).
+  void wait() noexcept
+  {
+    DoutEntering(dc::notice, "Semaphore::wait()");
+    if (!fast_try_wait())
+      slow_wait();
+  }
+
+  bool try_wait() noexcept
+  {
+    DoutEntering(dc::notice, "Semaphore::try_wait()");
+    return fast_try_wait();
   }
 };
 

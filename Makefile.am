@@ -1,12 +1,18 @@
 AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(srcdir)/.. -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
-EXTRA_DIST = AIMutex.h AIRecursiveMutex.h Condition.h
-
 noinst_LTLIBRARIES = libthreadsafe.la
 
 libthreadsafe_la_SOURCES = \
+	aithreadsafe.h \
+	aithreadid.h \
 	aithreadid.cxx \
-	aithreadid.h
+	AIMutex.h \
+	AIReadWriteMutex.h \
+	AIReadWriteSpinLock.h \
+	Condition.h \
+	Futex.h \
+	Semaphore.h \
+	Semaphore.cxx
 
 libthreadsafe_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 
