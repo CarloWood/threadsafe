@@ -12,7 +12,9 @@ libthreadsafe_la_SOURCES = \
 	Condition.h \
 	Futex.h \
 	Semaphore.h \
-	Semaphore.cxx
+	Semaphore.cxx \
+	SpinSemaphore.h \
+	SpinSemaphore.cxx
 
 libthreadsafe_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 

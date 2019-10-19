@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "threadsafe/Futex.h"
+#include "Futex.h"
 #include "debug.h"
 
 namespace aithreadsafe {
@@ -89,7 +89,13 @@ class Semaphore : public Futex<uint64_t>
   // there are no tokens so that we are very likely to go to sleep.
   void slow_wait() noexcept;
 
-  bool fast_try_wait() noexcept
+  // Try to remove a token from the semaphore.
+  //
+  // Returns a recently read value of m_word.
+  // m_word was not changed by this function when (word & tokens_mask) == 0,
+  // otherwise the number of tokens were decremented by one and the returned
+  // is the value of m_word immediately before this decrement.
+  uint64_t fast_try_wait() noexcept
   {
     uint64_t word = m_word.load(std::memory_order_relaxed);
     do
@@ -98,13 +104,13 @@ class Semaphore : public Futex<uint64_t>
       Dout(dc::notice, "tokens = " << ntokens << "; waiters = " << (word >> nwaiters_shift));
       // Are there any tokens to grab?
       if (ntokens == 0)
-        return false;           // No debug output needed: if the above line prints tokens = 0 then return false is implied.
+        return word;            // No debug output needed: if the above line prints tokens = 0 then return false is implied.
       // We seem to have a token, try to grab it.
     }
     while (!m_word.compare_exchange_weak(word, word - 1, std::memory_order_acquire));
     // Token successfully grabbed.
     Dout(dc::notice, "Success, now " << ((word & tokens_mask) - 1) << " tokens left.");
-    return true;
+    return word;
   }
 
   // Removes one token from the semaphore.
@@ -114,14 +120,15 @@ class Semaphore : public Futex<uint64_t>
   void wait() noexcept
   {
     DoutEntering(dc::notice, "Semaphore::wait()");
-    if (!fast_try_wait())
+    uint64_t word = fast_try_wait();
+    if ((word & tokens_mask) == 0)
       slow_wait();
   }
 
   bool try_wait() noexcept
   {
     DoutEntering(dc::notice, "Semaphore::try_wait()");
-    return fast_try_wait();
+    return (fast_try_wait() & tokens_mask);
   }
 };
 
