@@ -67,7 +67,9 @@ class Semaphore : public Futex<uint64_t>
   {
     DoutEntering(dc::notice, "Semaphore::post(" << n << ")");
     // Add n tokens.
-    uint64_t prev_word = m_word.fetch_add(n, std::memory_order_relaxed);
+    // A sem_wait needs to synchronize with the sem_post that provided the token, so that whatever
+    // lead to the sem_post happens before the code after sem_wait.
+    uint64_t prev_word = m_word.fetch_add(n, std::memory_order_release);
 #if CW_DEBUG
     uint64_t prev_tokens = prev_word & tokens_mask;
     Dout(dc::notice, "tokens " << prev_tokens << " --> " << (prev_tokens + n));

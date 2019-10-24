@@ -157,7 +157,9 @@ class SpinSemaphore : public Futex<uint64_t>
     // Don't call post with n == 0.
     ASSERT(n >= 1);
     // Add n tokens.
-    uint64_t const prev_word = m_word.fetch_add(n, std::memory_order_relaxed);
+    // A sem_wait needs to synchronize with the sem_post that provided the token, so that whatever
+    // lead to the sem_post happens before the code after sem_wait.
+    uint64_t const prev_word = m_word.fetch_add(n, std::memory_order_release);
     uint32_t const prev_ntokens = prev_word & tokens_mask;
     bool const have_spinner = prev_word & spinner_mask;
 

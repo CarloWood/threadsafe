@@ -45,7 +45,7 @@ void Semaphore::slow_wait() noexcept
       // Linux kernels before 2.6.22 could also return EINTR upon a supurious wakeup,
       // in which case it is also OK to just reenter wait() again.
       [[maybe_unused]] int res;
-      while ((res = Futex<uint64_t>::wait(ntokens)) == -1 && errno != EAGAIN)
+      while ((res = Futex<uint64_t>::wait(0)) == -1 && errno != EAGAIN)
         ;
       // EAGAIN happens when the number of tokens was changed in the meantime.
       // We (supuriously?) woke up or failed to go to sleep because the number of tokens changed.
@@ -57,7 +57,7 @@ void Semaphore::slow_wait() noexcept
     else
     {
       // (Try to) atomically grab a token and stop being a waiter.
-      if (m_word.compare_exchange_weak(word, word - one_waiter - 1, std::memory_order_acquire, std::memory_order_relaxed))
+      if (m_word.compare_exchange_weak(word, word - one_waiter - 1, std::memory_order_acquire, std::memory_order_acquire))
       {
         Dout(dc::notice, "Successfully obtained a token. Now " << (ntokens - 1) << " tokens and " << ((word - one_waiter) >> nwaiters_shift) << " waiters left.");
         break;
