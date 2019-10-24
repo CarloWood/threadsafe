@@ -45,7 +45,7 @@ void SpinSemaphore::slow_wait(uint64_t word) noexcept
                           | spinner_mask              // Also, if there isn't already a spinner, grab the spinner bit.
                         : word - 1;                   // Someone added a new token before we even could go to sleep. Try to grab it!
   }
-  while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_seq_cst)); // FIXME: memory order.
+  while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_acquire));
   bool we_are_spinner = false;
 
   // Wait for a token to be available. Retry until we can grab one.
@@ -71,16 +71,16 @@ void SpinSemaphore::slow_wait(uint64_t word) noexcept
       // interrupted by a signal. In that case errno should be set to EINTR.
       // [Linux kernels before 2.6.22 could also return EINTR upon a spurious wakeup,
       // in which case it is also OK to just reenter wait() again.]
-futex_sleep:
       [[maybe_unused]] int res;
-      while ((res = Futex<uint64_t>::wait(ntokens)) == -1 && errno != EAGAIN)
+futex_sleep:
+      while ((res = Futex<uint64_t>::wait(0)) == -1 && errno != EAGAIN)
         ;
       // EAGAIN happens when the number of tokens was changed in the meantime.
       // We (supuriously?) woke up or failed to go to sleep because the number of tokens changed.
       // It is therefore not sure that there is a token for us. Refresh word and try again.
       word = m_word.load(std::memory_order_relaxed);
       Dout(dc::notice(res == 0), "Woke up! tokens = " << (word & tokens_mask) << "; waiters = " << (word >> nwaiters_shift));
-      // We woke up, try to again to get a token.
+      // We woke up, try again to get a token.
       do
       {
         already_had_spinner = (word & spinner_mask);
@@ -88,11 +88,16 @@ futex_sleep:
         Dout(dc::notice, "Seeing " << ntokens << " tokens and " << (word >> nwaiters_shift) << " waiters.");
         new_word = !ntokens ? word | spinner_mask
                             : word - one_waiter - 1;    // (Try to) atomically grab a token and stop being a waiter.
+#ifdef DEBUGGENMC
+        if (res == 0)
+          new_word -= futex_woke_bit;                   // We're done grabbing a token (if any) after waking up from Futex::wait.
+        if (0)
+#endif
         // There is no need to do the CAS below when it would be a nop.
         if (!ntokens && already_had_spinner)
           break;
       }
-      while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_seq_cst));         // FIXME: memory order.
+      while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_acquire));
       // If ntokens > 0 here then we successfully grabbed one, otherwise
       // if already_had_spinner is false then we successfully became the spinner ourselves.
       // Go to the top of the loop to handle both situations...
@@ -102,22 +107,18 @@ futex_sleep:
       do
       {
         // We are the spinner. Spin instead of going to sleep.
-        uint64_t word = DelayLoop::delay_loop(m_word, DelayLoop::s_outer_loop_size, DelayLoop::s_inner_loop_size);
+        word = DelayLoop::delay_loop(m_word, DelayLoop::s_outer_loop_size, DelayLoop::s_inner_loop_size);
 
-        // New tokens were added...
-        ntokens = word & tokens_mask;
-
-        if (AI_UNLIKELY(ntokens == 0))          // ...or did we time out?
+        for (;;)
         {
+          ntokens = word & tokens_mask;
+          if (AI_UNLIKELY(ntokens > 0))         // New tokens were added...
+            break;
+          // ...or did we time out?
           new_word = word & ~spinner_mask;      // Unbecome the spinner.
-          while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_seq_cst))      // FIXME: memory order.
-          {
-            ntokens = word & tokens_mask;
-            if (AI_UNLIKELY(ntokens > 0))       // A token we added before we could unbecome the spinner!
-              break;
-          }
-          if (ntokens == 0)
-            goto futex_sleep;
+          if (!m_word.compare_exchange_weak(word, new_word, std::memory_order_relaxed))
+            continue;
+          goto futex_sleep;
         }
 
         // Before we execute the following CAS new idle threads can decrement ntokens,
@@ -136,8 +137,12 @@ futex_sleep:
         do
         {
           new_word = word - 1 - spinner_mask - one_waiter;
+#ifdef DEBUGGENMC
+          if ((word >> nwaiters_shift) > 0 && ntokens > 1)
+            new_word += futex_wake_bit;                                                 // Mark that we are going to call Futex::wake.
+#endif
         }
-        while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_seq_cst) &&    // FIXME: memory order.
+        while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_acquire) &&
                (ntokens = (word & tokens_mask)) > 0);
       }
       while (ntokens == 0);
@@ -148,6 +153,9 @@ futex_sleep:
       {
         Dout(dc::notice, "Calling Futex<uint64_t>::wake(" << (ntokens - 1) << ") because there were waiters (" << nwaiters << ").");
         DEBUG_ONLY(uint32_t woken_up =) Futex<uint64_t>::wake(ntokens - 1);
+#ifdef DEBUGGENMC
+        atomic_fetch_sub_explicit(&m_word, futex_wake_bit, memory_order_release);       // Done calling Futex::wake.
+#endif
         Dout(dc::notice, "Woke up " << woken_up << " threads.");
         ASSERT(woken_up <= ntokens);
       }
