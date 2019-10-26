@@ -231,6 +231,18 @@ class SpinSemaphore : public Futex<uint64_t>
     DoutEntering(dc::notice, "SpinSemaphore::try_wait()");
     return (fast_try_wait() & tokens_mask);
   }
+
+#ifdef CWDEBUG
+  friend std::ostream& operator<<(std::ostream& os, SpinSemaphore const& spin_semaphore)
+  {
+    uint64_t word = spin_semaphore.m_word.load(std::memory_order_relaxed);
+    uint64_t nwaiters = word >> nwaiters_shift;
+    bool spinner = word & spinner_mask;
+    uint64_t ntokens = word & tokens_mask;
+    os << "{waiters:" << nwaiters << ", spinner:" << spinner << ", tokens:" << ntokens << "}";
+    return os;
+  };
+#endif
 };
 
 } // namespace aithreadsafe
