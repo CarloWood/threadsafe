@@ -31,6 +31,14 @@
 #include "debug.h"
 #include <mutex>
 
+#undef SPINSEMAPHORE_STATS
+
+#if defined(CWDEBUG) && !defined(DOXYGEN)
+NAMESPACE_DEBUG_CHANNELS_START
+extern channel_ct semaphore;
+NAMESPACE_DEBUG_CHANNELS_END
+#endif
+
 namespace aithreadsafe {
 
 // class SpinSemaphore
@@ -153,7 +161,7 @@ class SpinSemaphore : public Futex<uint64_t>
   // That thread will then wake up the additional threads, if any, before returning from wait().
   void post(uint32_t n = 1) noexcept
   {
-    DoutEntering(dc::notice, "SpinSemaphore::post(" << n << ")");
+    DoutEntering(dc::semaphore, "SpinSemaphore::post(" << n << ")");
     // Don't call post with n == 0.
     ASSERT(n >= 1);
     // Add n tokens.
@@ -163,8 +171,12 @@ class SpinSemaphore : public Futex<uint64_t>
     uint32_t const prev_ntokens = prev_word & tokens_mask;
     bool const have_spinner = prev_word & spinner_mask;
 
+#ifdef SPINSEMAPHORE_STATS
+    m_calls_to_post.fetch_add(1, std::memory_order_relaxed);
+#endif
+
 #if CW_DEBUG
-    Dout(dc::notice, "tokens " << prev_ntokens << " --> " << (prev_ntokens + n));
+    Dout(dc::semaphore, "tokens " << prev_ntokens << " --> " << (prev_ntokens + n));
     // Check for possible overflow.
     ASSERT(prev_ntokens + n <= tokens_mask);
 #endif
@@ -172,15 +184,21 @@ class SpinSemaphore : public Futex<uint64_t>
     // We avoid doing a syscall here, so if we have a spinner we're done.
     if (!have_spinner)
     {
+#ifdef SPINSEMAPHORE_STATS
+      m_calls_to_post_no_spinner.fetch_add(1, std::memory_order_relaxed);
+#endif
       // No spinner was woken up, so we must do a syscall.
       //
       // Are there potential waiters that need to be woken up?
       uint32_t nwaiters = prev_word >> nwaiters_shift;
       if (nwaiters > prev_ntokens)
       {
-        Dout(dc::notice, "Calling Futex<uint64_t>::wake(" << n << ") because nwaiters > prev_tokens (" << nwaiters << " > " << prev_ntokens << ").");
+#ifdef SPINSEMAPHORE_STATS
+        m_calls_to_futex_wake.fetch_add(1, std::memory_order_relaxed);
+#endif
+        Dout(dc::semaphore, "Calling Futex<uint64_t>::wake(" << n << ") because nwaiters > prev_tokens (" << nwaiters << " > " << prev_ntokens << ").");
         DEBUG_ONLY(uint32_t woken_up =) Futex<uint64_t>::wake(n);
-        Dout(dc::notice, "Woke up " << woken_up << " threads.");
+        Dout(dc::semaphore, "Woke up " << woken_up << " threads.");
         ASSERT(woken_up <= n);
       }
     }
@@ -198,7 +216,7 @@ class SpinSemaphore : public Futex<uint64_t>
     do
     {
       uint64_t ntokens = word & tokens_mask;
-      Dout(dc::notice, "tokens = " << ntokens << "; waiters = " << (word >> nwaiters_shift) << "; spinner = " << ((word & spinner_mask) ? "yes" : "no"));
+      Dout(dc::semaphore, print_using(word, print_word_on));
       // Are there any tokens to grab?
       if (ntokens == 0)
         return word;           // No debug output needed: if the above line prints tokens = 0 then this return is implied.
@@ -206,7 +224,7 @@ class SpinSemaphore : public Futex<uint64_t>
     }
     while (!m_word.compare_exchange_weak(word, word - 1, std::memory_order_acquire));
     // Token successfully grabbed.
-    Dout(dc::notice, "Success, now " << ((word & tokens_mask) - 1) << " tokens left.");
+    Dout(dc::semaphore, "Success, now " << ((word & tokens_mask) - 1) << " tokens left.");
     return word;
   }
 
@@ -220,7 +238,10 @@ class SpinSemaphore : public Futex<uint64_t>
   // If no token is available then the thread will block until it manages to grab a new token (added with post(n) by another thread).
   void wait() noexcept
   {
-    DoutEntering(dc::notice, "SpinSemaphore::wait()");
+    DoutEntering(dc::semaphore, "SpinSemaphore::wait()");
+#ifdef SPINSEMAPHORE_STATS
+    int ctw = m_calls_to_wait.fetch_add(1, std::memory_order_relaxed);
+#endif
     uint64_t word = fast_try_wait();
     if ((word & tokens_mask) == 0)
       slow_wait(word);
@@ -228,20 +249,39 @@ class SpinSemaphore : public Futex<uint64_t>
 
   bool try_wait() noexcept
   {
-    DoutEntering(dc::notice, "SpinSemaphore::try_wait()");
+    DoutEntering(dc::semaphore, "SpinSemaphore::try_wait()");
+#ifdef SPINSEMAPHORE_STATS
+    m_calls_to_try_wait.fetch_add(1, std::memory_order_relaxed);
+#endif
     return (fast_try_wait() & tokens_mask);
   }
 
 #ifdef CWDEBUG
-  friend std::ostream& operator<<(std::ostream& os, SpinSemaphore const& spin_semaphore)
+  static void print_word_on(std::ostream& os, uint64_t word)
   {
-    uint64_t word = spin_semaphore.m_word.load(std::memory_order_relaxed);
     uint64_t nwaiters = word >> nwaiters_shift;
     bool spinner = word & spinner_mask;
     uint64_t ntokens = word & tokens_mask;
     os << "{waiters:" << nwaiters << ", spinner:" << spinner << ", tokens:" << ntokens << "}";
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, SpinSemaphore const& spin_semaphore)
+  {
+    print_word_on(os, spin_semaphore.m_word.load(std::memory_order_relaxed));
     return os;
   };
+#endif
+
+#ifdef SPINSEMAPHORE_STATS
+  std::atomic_int m_calls_to_post;
+  std::atomic_int m_calls_to_post_no_spinner;
+  std::atomic_int m_calls_to_futex_wake;
+  std::atomic_int m_calls_to_try_wait;
+  std::atomic_int m_calls_to_wait;
+  std::atomic_int m_calls_to_slow_wait;
+  std::atomic_int m_calls_to_futex_wait;
+
+  void print_stats_on(std::ostream& os);
 #endif
 };
 

@@ -30,6 +30,10 @@ namespace aithreadsafe {
 
 void SpinSemaphore::slow_wait(uint64_t word) noexcept
 {
+#ifdef SPINSEMAPHORE_STATS
+  m_calls_to_slow_wait.fetch_add(1, std::memory_order_relaxed);
+#endif
+
   // Calling slow_wait implies we have (had) no tokens, hence this should be true.
   // Don't call slow_wait unless this is true.
   ASSERT((word & tokens_mask) == 0);
@@ -73,6 +77,9 @@ void SpinSemaphore::slow_wait(uint64_t word) noexcept
       // in which case it is also OK to just reenter wait() again.]
       [[maybe_unused]] int res;
 futex_sleep:
+#ifdef SPINSEMAPHORE_STATS
+      m_calls_to_futex_wait.fetch_add(1, std::memory_order_relaxed);
+#endif
       while ((res = Futex<uint64_t>::wait(0)) == -1 && errno != EAGAIN)
         ;
       // EAGAIN happens when the number of tokens was changed in the meantime.
@@ -152,6 +159,9 @@ futex_sleep:
       if (nwaiters > 0 && ntokens > 1)
       {
         Dout(dc::notice, "Calling Futex<uint64_t>::wake(" << (ntokens - 1) << ") because there were waiters (" << nwaiters << ").");
+#ifdef SPINSEMAPHORE_STATS
+        m_calls_to_futex_wake.fetch_add(1, std::memory_order_relaxed);
+#endif
         DEBUG_ONLY(uint32_t woken_up =) Futex<uint64_t>::wake(ntokens - 1);
 #ifdef DEBUGGENMC
         atomic_fetch_sub_explicit(&m_word, futex_wake_bit, memory_order_release);       // Done calling Futex::wake.
@@ -240,4 +250,23 @@ void SpinSemaphore::DelayLoop::calibrate(std::atomic<uint64_t>& word)
       "; outer_loop_size = " << s_outer_loop_size << "; test run: " << fixed_ils_delay_loop.avg_of(s_outer_loop_size) << " ms.");
 }
 
+#ifdef SPINSEMAPHORE_STATS
+void SpinSemaphore::print_stats_on(std::ostream& os)
+{
+  os << "SpinSemaphore stats:\nCalls to post: " << m_calls_to_post << '\n';
+  os << "Calls to post, no spinner: " << m_calls_to_post_no_spinner << '\n';
+  os << "Calls to Futex::wake: " << m_calls_to_futex_wake << '\n';
+  os << "Calls to try_wait: " << m_calls_to_try_wait << '\n';
+  os << "Calls to wait: " << m_calls_to_wait << '\n';
+  os << "Calls to slow_wait: " << m_calls_to_slow_wait << '\n';
+  os << "Calls to Futex::wait: " << m_calls_to_futex_wait << '\n';
+}
+#endif
+
 } // namespace aithreadsafe
+
+#if defined(CWDEBUG) && !defined(DOXYGEN)
+NAMESPACE_DEBUG_CHANNELS_START
+channel_ct semaphore("SEMAPHORE");
+NAMESPACE_DEBUG_CHANNELS_END
+#endif
