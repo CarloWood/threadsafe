@@ -25,6 +25,9 @@
 #include "SpinSemaphore.h"
 #include "utils/DelayLoopCalibration.h"
 #include <cmath>
+#ifdef SPINSEMAPHORE_STATS
+#include <iomanip>
+#endif
 
 namespace aithreadsafe {
 
@@ -240,7 +243,8 @@ void SpinSemaphore::DelayLoop::calibrate(std::atomic<uint64_t>& word)
   }
 
   // Finally, find the best s_outer_loop_size with this s_inner_loop_size.
-  s_outer_loop_size = fixed_ils_delay_loop.peak_detect(goal COMMA_CWDEBUG_ONLY("Delay with goal " + std::to_string(goal) + " ms and ils = " + std::to_string(s_inner_loop_size)));
+  s_outer_loop_size = fixed_ils_delay_loop.peak_detect(goal
+      COMMA_CWDEBUG_ONLY("Delay with goal " + std::to_string(goal) + " ms and ils = " + std::to_string(s_inner_loop_size)));
   Dout(dc::delayloop, "s_outer_loop_size (with s_inner_loop_size = " << s_inner_loop_size << ") = " << s_outer_loop_size);
 
   // Set s_outer_loop_size to a value that should lead to a delay_ms delay.
@@ -253,12 +257,13 @@ void SpinSemaphore::DelayLoop::calibrate(std::atomic<uint64_t>& word)
 #ifdef SPINSEMAPHORE_STATS
 void SpinSemaphore::print_stats_on(std::ostream& os)
 {
-  os << "SpinSemaphore stats:\nCalls to post: " << m_calls_to_post << '\n';
+  double avg_tokens_added = 1.0 * m_tokens_added / m_calls_to_post;
+  os << "SpinSemaphore stats:\nCalls to post: " << m_calls_to_post << " (" << m_tokens_added << " tokens in total: " << std::fixed << std::setprecision(2) << avg_tokens_added << " tokens on average per call).\n";
   os << "Calls to post, no spinner: " << m_calls_to_post_no_spinner << '\n';
   os << "Calls to Futex::wake: " << m_calls_to_futex_wake << '\n';
-  os << "Calls to try_wait: " << m_calls_to_try_wait << '\n';
+  os << "Calls to try_wait: " << m_calls_to_try_wait << " (failed: " << m_failed_try_wait << " = " << (100.0 * m_failed_try_wait / m_calls_to_try_wait) << "%).\n";
   os << "Calls to wait: " << m_calls_to_wait << '\n';
-  os << "Calls to slow_wait: " << m_calls_to_slow_wait << '\n';
+  os << "Calls to slow_wait: " << m_calls_to_slow_wait << " (" << std::fixed << std::setprecision(2) << (100.0 * m_calls_to_slow_wait / m_calls_to_wait) << "%).\n";
   os << "Calls to Futex::wait: " << m_calls_to_futex_wait << '\n';
 }
 #endif
@@ -268,5 +273,6 @@ void SpinSemaphore::print_stats_on(std::ostream& os)
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
 channel_ct semaphore("SEMAPHORE");
+channel_ct semaphorestats("SEMAPHORESTATS");
 NAMESPACE_DEBUG_CHANNELS_END
 #endif

@@ -31,11 +31,12 @@
 #include "debug.h"
 #include <mutex>
 
-#undef SPINSEMAPHORE_STATS
+#define SPINSEMAPHORE_STATS
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
 extern channel_ct semaphore;
+extern channel_ct semaphorestats;
 NAMESPACE_DEBUG_CHANNELS_END
 #endif
 
@@ -118,18 +119,18 @@ class SpinSemaphore : public Futex<uint64_t>
     // The last read value of word is returned.
     [[gnu::always_inline]] static uint64_t delay_loop(std::atomic<uint64_t>& word_ref, unsigned int ols, unsigned int ils)
     {
-      uint64_t word;
+      uint64_t last_word;
       unsigned int i = ols;
       do
       {
         cpu_relax();
-        if (((word = word_ref.load(std::memory_order_relaxed)) & tokens_mask) != 0)
+        if (((last_word = word_ref.load(std::memory_order_relaxed)) & tokens_mask) != 0)
           break;
         for (int j = ils; j != 0; --j)
           asm volatile ("");
       }
       while (--i != 0);
-      return word;
+      return last_word;
     };
 
    public:
@@ -143,6 +144,17 @@ class SpinSemaphore : public Futex<uint64_t>
  public:
   // Construct a SpinSemaphore with no waiters, no spinner and no tokens.
   SpinSemaphore() : Futex<uint64_t>(0)
+#ifdef SPINSEMAPHORE_STATS
+  , m_calls_to_post(0),
+  m_tokens_added(0),
+  m_calls_to_post_no_spinner(0),
+  m_calls_to_futex_wake(0),
+  m_calls_to_try_wait(0),
+  m_failed_try_wait(0),
+  m_calls_to_wait(0),
+  m_calls_to_slow_wait(0),
+  m_calls_to_futex_wait(0)
+#endif
   {
     // Calibrate the delay loop once (using the m_word atomic of the first SpinSemaphore that is created).
     static std::once_flag flag;
@@ -173,6 +185,7 @@ class SpinSemaphore : public Futex<uint64_t>
 
 #ifdef SPINSEMAPHORE_STATS
     m_calls_to_post.fetch_add(1, std::memory_order_relaxed);
+    m_tokens_added.fetch_add(n, std::memory_order_relaxed);
 #endif
 
 #if CW_DEBUG
@@ -241,6 +254,8 @@ class SpinSemaphore : public Futex<uint64_t>
     DoutEntering(dc::semaphore, "SpinSemaphore::wait()");
 #ifdef SPINSEMAPHORE_STATS
     int ctw = m_calls_to_wait.fetch_add(1, std::memory_order_relaxed);
+    if (ctw % 10000 == 0)
+      Dout(dc::semaphorestats, *this);
 #endif
     uint64_t word = fast_try_wait();
     if ((word & tokens_mask) == 0)
@@ -250,10 +265,13 @@ class SpinSemaphore : public Futex<uint64_t>
   bool try_wait() noexcept
   {
     DoutEntering(dc::semaphore, "SpinSemaphore::try_wait()");
+    bool success = fast_try_wait() & tokens_mask;
 #ifdef SPINSEMAPHORE_STATS
     m_calls_to_try_wait.fetch_add(1, std::memory_order_relaxed);
+    if (!success)
+      m_failed_try_wait.fetch_add(1, std::memory_order_relaxed);
 #endif
-    return (fast_try_wait() & tokens_mask);
+    return success;
   }
 
 #ifdef CWDEBUG
@@ -274,9 +292,11 @@ class SpinSemaphore : public Futex<uint64_t>
 
 #ifdef SPINSEMAPHORE_STATS
   std::atomic_int m_calls_to_post;
+  std::atomic_int m_tokens_added;
   std::atomic_int m_calls_to_post_no_spinner;
   std::atomic_int m_calls_to_futex_wake;
   std::atomic_int m_calls_to_try_wait;
+  std::atomic_int m_failed_try_wait;
   std::atomic_int m_calls_to_wait;
   std::atomic_int m_calls_to_slow_wait;
   std::atomic_int m_calls_to_futex_wait;
