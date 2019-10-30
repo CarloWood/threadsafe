@@ -128,6 +128,7 @@ futex_sleep:
           new_word = word & ~spinner_mask;      // Unbecome the spinner.
           if (!m_word.compare_exchange_weak(word, new_word, std::memory_order_relaxed))
             continue;
+          we_are_spinner = false;
           goto futex_sleep;
         }
 
