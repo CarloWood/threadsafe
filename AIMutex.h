@@ -39,6 +39,8 @@ class AIMutex
   static_assert(std::atomic<std::thread::id>::is_always_lock_free, "Get a real OS");
 
  public:
+  AIMutex() : m_id(std::thread::id{}) { }
+
   void lock()
   {
     // AIMutex is not recursive.
