@@ -116,7 +116,7 @@ class SpinSemaphore : public Futex<uint64_t>
     // This delay loop takes arguments for word, ols and ils for calibration purposes.
     // Returns when either ~1 ms passed or the least significant 32 bits in word changed to non-zero.
     // The last read value of word is returned.
-    [[gnu::always_inline]] static bool delay_loop(std::atomic<uint64_t>& word_ref, unsigned int ols, unsigned int ils)
+    [[gnu::always_inline]] static uint64_t delay_loop(std::atomic<uint64_t>& word_ref, unsigned int ols, unsigned int ils)
     {
       uint64_t word;
       unsigned int i = ols;
