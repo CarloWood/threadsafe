@@ -1,8 +1,8 @@
 /**
  * @file
- * @brief Declaration of class Condition.
+ * @brief Declaration of class StartingBarrier.
  *
- * Copyright (C) 2017  Carlo Wood.
+ * Copyright (C) 2019  Carlo Wood.
  *
  * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
  * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
@@ -23,39 +23,28 @@
 
 #pragma once
 
-#include "AIMutex.h"
-#include <condition_variable>
+#include "Condition.h"
 
 namespace aithreadsafe
 {
 
-// Block (multiple) thread(s) until signal() is called.
+// Block threads until `stalls' threads are ready.
 //
-// If signal() was already called before wait() then
-// wait() also doesn't block anymore.
-//
-class Condition : public AIMutex {
-  private:
-    std::condition_variable_any m_condition_variable;
-    bool m_condition;
+class StartingBarrier
+{
+ private:
+  std::atomic_int m_stalls;
+  Condition m_condition;
 
-  public:
-    Condition() : m_condition(false) { }
+ public:
+  StartingBarrier(int stalls) : m_stalls(stalls) { }
 
-    void wait()
-    {
-      std::lock_guard<AIMutex> lock(*this);
-//      ASSERT(is_self_locked());
-      m_condition_variable.wait(*this, [this](){ return m_condition; });
-      m_condition = false;
-    }
-
-    void signal()
-    {
-      std::lock_guard<AIMutex> lock(*this);
-      m_condition = true;
-      m_condition_variable.notify_one();
-    }
+  void wait()
+  {
+    if (m_stalls-- == 1)
+      m_condition.signal();
+    m_condition.wait();
+  }
 };
 
 } // namespace aithreadsafe
