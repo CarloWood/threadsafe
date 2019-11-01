@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Declaration of class Condition.
+ * @brief Declaration of class Gate.
  *
  * Copyright (C) 2017  Carlo Wood.
  *
@@ -29,33 +29,34 @@
 namespace aithreadsafe
 {
 
-// Block (multiple) thread(s) until signal() is called.
+// Block (multiple) thread(s) until open() is called.
 //
-// If signal() was already called before wait() then
+// If open() was already called before wait() then
 // wait() also doesn't block anymore.
 //
-class Condition : public AIMutex {
-  private:
-    std::condition_variable_any m_condition_variable;
-    bool m_condition;
+class Gate : public AIMutex
+{
+ private:
+  std::condition_variable_any m_condition_variable;
+  bool m_open;
 
-  public:
-    Condition() : m_condition(false) { }
+ public:
+  Gate() : m_open(false) { }
 
-    void wait()
+  void wait()
+  {
+    std::lock_guard<AIMutex> lock(*this);
+    m_condition_variable.wait(*this, [this](){ return m_open; });
+  }
+
+  void open()
+  {
     {
       std::lock_guard<AIMutex> lock(*this);
-//      ASSERT(is_self_locked());
-      m_condition_variable.wait(*this, [this](){ return m_condition; });
-      m_condition = false;
+      m_open = true;
     }
-
-    void signal()
-    {
-      std::lock_guard<AIMutex> lock(*this);
-      m_condition = true;
-      m_condition_variable.notify_one();
-    }
+    m_condition_variable.notify_all();
+  }
 };
 
 } // namespace aithreadsafe

@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Declaration of class StartingBarrier.
+ * @brief Declaration of class StartingGate.
  *
  * Copyright (C) 2019  Carlo Wood.
  *
@@ -23,18 +23,18 @@
 
 #pragma once
 
-#include "Condition.h"
+#include "Gate.h"
 
 namespace aithreadsafe
 {
 
 // Block threads until `stalls' threads are ready.
 //
-class StartingBarrier
+class StartingGate
 {
  private:
   std::atomic_int m_stalls;
-  Condition m_condition;
+  Gate m_gate;
 
  public:
   StartingBarrier(int stalls) : m_stalls(stalls) { }
@@ -42,8 +42,8 @@ class StartingBarrier
   void wait()
   {
     if (m_stalls-- == 1)
-      m_condition.signal();
-    m_condition.wait();
+      m_gate.open();
+    m_gate.wait();
   }
 };
 

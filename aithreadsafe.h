@@ -599,10 +599,11 @@ struct AccessConst
       }
     }
 
-    // If m_primitive_mutex is a Condition, then this can be used to wait for a signal.
-    void wait() { this->m_wrapper->m_primitive_mutex.wait(); }
-    // If m_primitive_mutex is a Condition then this can be used to wake up the waiting thread.
-    void signal() { this->m_wrapper->m_primitive_mutex.signal(); }
+    // If m_primitive_mutex is a ConditionVariable, then this can be used to wait for a signal.
+    template<typename Predicate>
+    void wait(Predicate pred) { this->m_wrapper->m_primitive_mutex.wait(pred); }
+    // If m_primitive_mutex is a ConditionVariable then this can be used to wake up the waiting thread.
+    void notify_one() { this->m_wrapper->m_primitive_mutex.notify_one(); }
 
     // Experimental unlock/relock.
     void unlock()
