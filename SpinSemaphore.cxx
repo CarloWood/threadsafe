@@ -72,6 +72,7 @@ void SpinSemaphore::slow_wait(uint64_t word) noexcept
 
     if (!we_are_spinner)
     {
+      Dout(dc::semaphore, "Already had a spinner; calling Futex::wait.");
       // Already had a spinner, go to sleep.
       //
       // As of kernel 2.6.22 FUTEX_WAIT only returns with -1 when the syscall was
@@ -114,10 +115,16 @@ futex_sleep:
     }
     else
     {
+      Dout(dc::semaphore|continued_cf, "Became spinner; ");
       do
       {
         // We are the spinner. Spin instead of going to sleep.
-        word = DelayLoop::delay_loop(m_word, DelayLoop::s_outer_loop_size, DelayLoop::s_inner_loop_size);
+//        Dout(dc::continued, "entering delay loop... ");
+//        auto start = std::chrono::high_resolution_clock::now();
+        // Spin for 20 milliseconds...
+        word = DelayLoop::delay_loop(m_word, 20 * DelayLoop::s_outer_loop_size, DelayLoop::s_inner_loop_size);
+//        auto end = std::chrono::high_resolution_clock::now();
+//        std::chrono::duration<double> diff = end - start;
 
         for (;;)
         {
@@ -128,6 +135,8 @@ futex_sleep:
           new_word = word & ~spinner_mask;      // Unbecome the spinner.
           if (!m_word.compare_exchange_weak(word, new_word, std::memory_order_relaxed))
             continue;
+//          Dout(dc::finish, "timed out (" << (1000 * diff.count()) << " ms). No longer the spinner.");
+          Dout(dc::finish, "timed out. No longer the spinner.");
           we_are_spinner = false;
           goto futex_sleep;
         }
@@ -155,6 +164,7 @@ futex_sleep:
         }
         while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_acquire) &&
                (ntokens = (word & tokens_mask)) > 0);
+        Dout(dc::finish, "Grabbed a token; no longer the spinner. Now " << print_using(new_word, print_word_on));
       }
       while (ntokens == 0);
       // We must wake up ntokens - 1 threads.

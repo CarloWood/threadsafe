@@ -189,7 +189,7 @@ class SpinSemaphore : public Futex<uint64_t>
 #endif
 
 #if CW_DEBUG
-    Dout(dc::semaphore, "tokens " << prev_ntokens << " --> " << (prev_ntokens + n));
+    Dout(dc::semaphore, "Now " << print_using(prev_word + n, print_word_on));
     // Check for possible overflow.
     ASSERT(prev_ntokens + n <= tokens_mask);
 #endif
