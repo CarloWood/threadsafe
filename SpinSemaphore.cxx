@@ -61,7 +61,7 @@ void SpinSemaphore::slow_wait(uint64_t word) noexcept
     if (AI_UNLIKELY(ntokens > 0))
     {
       // There were new tokens and we managed to grab one.
-      Dout(dc::notice, "Successfully obtained a token. Now " << (ntokens - 1) << " tokens and " << ((word >> nwaiters_shift) - 1) << " waiters left.");
+      Dout(dc::semaphore, "Successfully obtained a token. Now " << (ntokens - 1) << " tokens and " << ((word >> nwaiters_shift) - 1) << " waiters left.");
       return;
     }
 
@@ -90,13 +90,13 @@ futex_sleep:
       // We (supuriously?) woke up or failed to go to sleep because the number of tokens changed.
       // It is therefore not sure that there is a token for us. Refresh word and try again.
       word = m_word.load(std::memory_order_relaxed);
-      Dout(dc::notice(res == 0), "Woke up! tokens = " << (word & tokens_mask) << "; waiters = " << (word >> nwaiters_shift));
+      Dout(dc::semaphore(res == 0), "Woke up! tokens = " << (word & tokens_mask) << "; waiters = " << (word >> nwaiters_shift));
       // We woke up, try again to get a token.
       do
       {
         already_had_spinner = (word & spinner_mask);
         ntokens = word & tokens_mask;
-        Dout(dc::notice, "Seeing " << ntokens << " tokens and " << (word >> nwaiters_shift) << " waiters.");
+        Dout(dc::semaphore, "Seeing " << ntokens << " tokens and " << (word >> nwaiters_shift) << " waiters.");
         new_word = !ntokens ? word | spinner_mask
                             : word - one_waiter - 1;    // (Try to) atomically grab a token and stop being a waiter.
 #ifdef DEBUGGENMC
@@ -172,7 +172,7 @@ futex_sleep:
       uint32_t nwaiters = word >> nwaiters_shift;
       if (nwaiters > 0 && ntokens > 1)
       {
-        Dout(dc::notice, "Calling Futex<uint64_t>::wake(" << (ntokens - 1) << ") because there were waiters (" << nwaiters << ").");
+        Dout(dc::semaphore, "Calling Futex<uint64_t>::wake(" << (ntokens - 1) << ") because there were waiters (" << nwaiters << ").");
 #ifdef SPINSEMAPHORE_STATS
         m_calls_to_futex_wake.fetch_add(1, std::memory_order_relaxed);
 #endif
@@ -180,7 +180,7 @@ futex_sleep:
 #ifdef DEBUGGENMC
         atomic_fetch_sub_explicit(&m_word, futex_wake_bit, memory_order_release);       // Done calling Futex::wake.
 #endif
-        Dout(dc::notice, "Woke up " << woken_up << " threads.");
+        Dout(dc::semaphore, "Woke up " << woken_up << " threads.");
         ASSERT(woken_up <= ntokens);
       }
       return;

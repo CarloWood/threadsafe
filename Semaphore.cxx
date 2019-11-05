@@ -37,7 +37,7 @@ void Semaphore::slow_wait() noexcept
   {
     // If there is no token available, block until a new token was added.
     uint32_t ntokens = word & tokens_mask;
-    Dout(dc::notice, "Seeing " << ntokens << " tokens and " << (word >> nwaiters_shift) << " waiters.");
+    Dout(dc::semaphore, "Seeing " << ntokens << " tokens and " << (word >> nwaiters_shift) << " waiters.");
     if (ntokens == 0)
     {
       // As of kernel 2.6.22 FUTEX_WAIT only returns with -1 when the syscall was
@@ -51,7 +51,7 @@ void Semaphore::slow_wait() noexcept
       // We (supuriously?) woke up or failed to go to sleep because the number of tokens changed.
       // It is therefore not sure that there is a token for us. Refresh word and try again.
       word = m_word.load(std::memory_order_relaxed);
-      Dout(dc::notice(res == 0), "Woke up! tokens = " << (word & tokens_mask) << "; waiters = " << (word >> nwaiters_shift));
+      Dout(dc::semaphore(res == 0), "Woke up! tokens = " << (word & tokens_mask) << "; waiters = " << (word >> nwaiters_shift));
       // We woke up, try to again to get a token.
     }
     else
@@ -59,7 +59,7 @@ void Semaphore::slow_wait() noexcept
       // (Try to) atomically grab a token and stop being a waiter.
       if (m_word.compare_exchange_weak(word, word - one_waiter - 1, std::memory_order_acquire, std::memory_order_acquire))
       {
-        Dout(dc::notice, "Successfully obtained a token. Now " << (ntokens - 1) << " tokens and " << ((word - one_waiter) >> nwaiters_shift) << " waiters left.");
+        Dout(dc::semaphore, "Successfully obtained a token. Now " << (ntokens - 1) << " tokens and " << ((word - one_waiter) >> nwaiters_shift) << " waiters left.");
         break;
       }
       // word was changed, try again.
