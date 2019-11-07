@@ -50,22 +50,23 @@ namespace aithreadsafe {
 // to that one bit to keep track of whether or not it has a spinning thread.
 //
 // ntokens; the number of available tokens: this many threads can return from
-//     wait() with adding more tokens, either because they already entered wait()
+//     wait() without adding more tokens, either because they already entered wait()
 //     or because they enter wait later.
 //
 //     Obtaining a token (decrementing ntokens while ntokens > 0) is the last
-//     thing a thread does before leaving wait() (expect for the spinner, which
-//     might call futex.wake(ntokens - 1) afterwards, see below.
+//     thing a thread does before leaving wait() (except for the spinner, which
+//     might call futex.wake(ntokens - 1) afterwards, see below).
 //     While the first thing that post(n) does is incrementing ntokens with n.
 //
 // nwaiters; an upper limit of the number of threads that are or will end up being
-//     blocked by a call to futex.wait() under the assumption that t does not change.
-//     Basically this number equals to the number of threads that entered wait()
-//     and did not obtain a token yet. It is incremented by one immediately upon
-//     entering slow_wait() (unless there are tokens, then ntokens is decremented
-//     instead and the thread leaves the function), and at exit of wait() nwaiters
-//     and ntokens are atomically both decremented (unless there are no tokens
-//     anymore, then neither is decremented and the thread stays inside wait()).
+//     blocked by a call to futex.wait() under the assumption that the number of
+//     tokens do not change. Basically this number equals the number of threads that
+//     entered wait() and did not obtain a token yet. It is incremented by one
+//     immediately upon entering slow_wait() (unless there are tokens, then ntokens
+//     is decremented instead and the thread leaves the function), and at exit of
+//     wait() nwaiters and ntokens are atomically both decremented (unless there
+//     are no tokens anymore, then neither is decremented and the thread stays
+//     inside wait()).
 //
 // spinner; the thread that "owns" the spinner_mask bit. If that bit is not set
 //     there is no spinner and when it is set there is a spinner. The thread that
@@ -80,7 +81,7 @@ namespace aithreadsafe {
 //     where ntokens is the number of tokens just prior to the successful decrement.
 //
 //     In other words, tokens added to the atomic while the spinner bit is set causes
-//     the spinner to take the responsiblity to wake up up till that many additional
+//     the spinner to take the responsiblity to wake up till that many additional
 //     threads, if any.
 
 class SpinSemaphore : public Futex<uint64_t>
@@ -104,7 +105,7 @@ class SpinSemaphore : public Futex<uint64_t>
  protected:
   struct DelayLoop
   {
-    static constexpr double delay_ms = 1.0;               // The require delay in ms.
+    static constexpr double delay_ms = 1.0;               // The required delay in ms.
     static constexpr double goal = 0.1;                   // Total time of delay loop while calibrating, in ms.
     static constexpr double time_per_loop = 1e-4;         // Shortest time between reads of atomic in loop, in ms (i.e. 100 ns).
     static constexpr int max_ols = goal / time_per_loop;  // Maximum value of outer loop size, during calibration.
