@@ -23,9 +23,9 @@
 
 #pragma once
 
+#include "debug.h"
 #include <mutex>
 #include <atomic>
-#include "debug.h"
 #include <thread>
 
 class AIMutex
