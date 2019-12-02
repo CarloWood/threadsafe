@@ -2,7 +2,7 @@
  * @file
  * @brief Implementation of the aithreadsafe namespace.
  *
- * Copyright (C) 2010, 2016, 2017  Carlo Wood.
+ * @Copyright (C) 2010, 2016, 2017  Carlo Wood.
  *
  * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
  * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
@@ -396,17 +396,17 @@ template<class WRAPPER>
 struct ConstReadAccess
 {
   public:
-    //! Internal enum for the lock-type of the Access object.
+    /// Internal enum for the lock-type of the Access object.
     enum state_type
     {
-      readlocked,	//!< A ConstReadAccess or ReadAccess.
-      read2writelocked,	//!< A WriteAccess constructed from a ReadAccess.
-      writelocked,	//!< A WriteAccess constructed from a ThreadSafe.
-      write2writelocked,//!< A WriteAccess constructed from (the ReadAccess base class of) a WriteAccess.
-      carrylocked	//!< A ReadAccess constructed from a Write2ReadCarry.
+      readlocked,	///< A ConstReadAccess or ReadAccess.
+      read2writelocked,	///< A WriteAccess constructed from a ReadAccess.
+      writelocked,	///< A WriteAccess constructed from a ThreadSafe.
+      write2writelocked,///< A WriteAccess constructed from (the ReadAccess base class of) a WriteAccess.
+      carrylocked	///< A ReadAccess constructed from a Write2ReadCarry.
     };
 
-    //! Construct a ConstReadAccess from a constant Wrapper.
+    /// Construct a ConstReadAccess from a constant Wrapper.
     template<typename ...Args>
     ConstReadAccess(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper)), m_state(readlocked)
     {
@@ -416,7 +416,7 @@ struct ConstReadAccess
       m_wrapper->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
     }
 
-    //! Destruct the Access object.
+    /// Destruct the Access object.
     // These should never be dynamically allocated, so there is no need to make this virtual.
     ~ConstReadAccess()
     {
@@ -433,14 +433,14 @@ struct ConstReadAccess
 #endif // THREADSAFE_DEBUG
     }
 
-    //! Access the underlaying object for read access.
+    /// Access the underlaying object for read access.
     typename WRAPPER::data_type const* operator->() const { return m_wrapper->ptr(); }
 
-    //! Access the underlaying object for read access.
+    /// Access the underlaying object for read access.
     typename WRAPPER::data_type const& operator*() const { return *m_wrapper->ptr(); }
 
   protected:
-    //! Constructor used by ReadAccess.
+    /// Constructor used by ReadAccess.
     ConstReadAccess(WRAPPER& wrapper, state_type state) : m_wrapper(&wrapper), m_state(state)
     {
 #if THREADSAFE_DEBUG
@@ -448,8 +448,8 @@ struct ConstReadAccess
 #endif // THREADSAFE_DEBUG
     }
 
-    WRAPPER* m_wrapper;		//!< Pointer to the object that we provide access to.
-    state_type const m_state;	//!< The lock state that m_wrapper is in.
+    WRAPPER* m_wrapper;		///< Pointer to the object that we provide access to.
+    state_type const m_state;	///< The lock state that m_wrapper is in.
 
     // Disallow copy constructing directly.
     ConstReadAccess(ConstReadAccess const&) = delete;
@@ -502,21 +502,21 @@ struct ReadAccess : public ConstReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::readlocked;
     using ConstReadAccess<WRAPPER>::carrylocked;
 
-    //! Construct a ReadAccess from a non-constant Wrapper.
+    /// Construct a ReadAccess from a non-constant Wrapper.
     template<typename ...Args>
     explicit ReadAccess(WRAPPER& wrapper, Args&&... args) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
     {
       this->m_wrapper->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
     }
 
-    //! Construct a ReadAccess from a Write2ReadCarry object containing an read locked Wrapper. Upon destruction leave the Wrapper read locked.
+    /// Construct a ReadAccess from a Write2ReadCarry object containing an read locked Wrapper. Upon destruction leave the Wrapper read locked.
     explicit ReadAccess(Write2ReadCarry<WRAPPER> const& w2rc) : ConstReadAccess<WRAPPER>(w2rc.m_wrapper, carrylocked)
     {
       assert(w2rc.m_used); // Always pass a w2rCarry to a wat first.
     }
 
   protected:
-    //! Constructor used by WriteAccess.
+    /// Constructor used by WriteAccess.
     ReadAccess(WRAPPER& wrapper, state_type state) : ConstReadAccess<WRAPPER>(wrapper, state) { }
 
     friend struct WriteAccess<WRAPPER>;
@@ -534,14 +534,14 @@ struct WriteAccess : public ReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::writelocked;
     using ConstReadAccess<WRAPPER>::write2writelocked;
 
-    //! Construct a WriteAccess from a non-constant Wrapper.
+    /// Construct a WriteAccess from a non-constant Wrapper.
     template<typename ...Args>
     explicit WriteAccess(WRAPPER& wrapper, Args&&... args) : ReadAccess<WRAPPER>(wrapper, writelocked)
     {
       this->m_wrapper->m_read_write_mutex.wrlock(std::forward<Args>(args)...);
     }
 
-    //! Promote read access to write access.
+    /// Promote read access to write access.
     explicit WriteAccess(ReadAccess<WRAPPER>& access) :
         ReadAccess<WRAPPER>(*access.m_wrapper, (access.m_state == readlocked) ? read2writelocked : write2writelocked)
     {
@@ -551,7 +551,7 @@ struct WriteAccess : public ReadAccess<WRAPPER>
       }
     }
 
-    //! Construct a WriteAccess from a Write2ReadCarry object containing an unlocked Wrapper. Upon destruction leave the Wrapper read locked.
+    /// Construct a WriteAccess from a Write2ReadCarry object containing an unlocked Wrapper. Upon destruction leave the Wrapper read locked.
     explicit WriteAccess(Write2ReadCarry<WRAPPER>& w2rc) : ReadAccess<WRAPPER>(w2rc.m_wrapper, read2writelocked)
     {
       assert(!w2rc.m_used); // Always pass a w2rCarry to the wat first. There can only be one wat.
@@ -559,10 +559,10 @@ struct WriteAccess : public ReadAccess<WRAPPER>
       this->m_wrapper->m_read_write_mutex.wrlock();
     }
 
-    //! Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
 
-    //! Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
 };
 
@@ -572,7 +572,7 @@ struct WriteAccess : public ReadAccess<WRAPPER>
 template<class WRAPPER>
 struct AccessConst
 {
-    //! Construct a AccessConst from a constant Wrapper.
+    /// Construct a AccessConst from a constant Wrapper.
     template<typename ...Args>
     AccessConst(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper))
     {
@@ -582,10 +582,10 @@ struct AccessConst
       this->m_wrapper->m_primitive_mutex.lock(std::forward<Args>(args)...);
     }
 
-    //! Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type const* operator->() const { return this->m_wrapper->ptr(); }
 
-    //! Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper->ptr(); }
 
     ~AccessConst()
@@ -626,7 +626,7 @@ struct AccessConst
     }
 
   protected:
-    WRAPPER* m_wrapper;		//!< Pointer to the object that we provide access to.
+    WRAPPER* m_wrapper;		///< Pointer to the object that we provide access to.
 
     // Disallow copy constructing directly.
     AccessConst(AccessConst const&) = delete;
@@ -642,14 +642,14 @@ template<class WRAPPER>
 struct Access : public AccessConst<WRAPPER>
 {
   public:
-    //! Construct a Access from a non-constant Wrapper.
+    /// Construct a Access from a non-constant Wrapper.
     template<typename ...Args>
     explicit Access(WRAPPER& wrapper, Args&&... args) : AccessConst<WRAPPER>(wrapper, std::forward<Args>(args)...) { }
 
-    //! Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
 
-    //! Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
 };
 
@@ -660,7 +660,7 @@ template<class WRAPPER>
 struct OTAccessConst
 {
   public:
-    //! Construct a OTAccessConst from a constant Wrapper.
+    /// Construct a OTAccessConst from a constant Wrapper.
     template<typename ...Args>
     OTAccessConst(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper), std::forward<Args>(args)...)
     {
@@ -678,14 +678,14 @@ struct OTAccessConst
     }
 #endif // THREADSAFE_DEBUG
 
-    //! Access the underlaying object for read access.
+    /// Access the underlaying object for read access.
     typename WRAPPER::data_type const* operator->() const { return this->m_wrapper->ptr(); }
 
-    //! Access the underlaying object for read write access.
+    /// Access the underlaying object for read write access.
     typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper->ptr(); }
 
   protected:
-    WRAPPER* m_wrapper;		//!< Pointer to the object that we provide access to.
+    WRAPPER* m_wrapper;		///< Pointer to the object that we provide access to.
 
     // Disallow copy constructing directly.
     OTAccessConst(OTAccessConst const&) = delete;
@@ -701,14 +701,14 @@ template<class WRAPPER>
 struct OTAccess : public OTAccessConst<WRAPPER>
 {
   public:
-    //! Construct a OTAccess from a non-constant Wrapper.
+    /// Construct a OTAccess from a non-constant Wrapper.
     template<typename ...Args>
     explicit OTAccess(WRAPPER& wrapper, Args&&... args) : OTAccessConst<WRAPPER>(wrapper, std::forward<Args>(args)...) { }
 
-    //! Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
 
-    //! Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
 };
 

@@ -2,7 +2,7 @@
  * @file
  * @brief Implementation of AIReadWriteMutex.
  *
- * Copyright (C) 2010, 2016, 2017  Carlo Wood.
+ * @Copyright (C) 2010, 2016, 2017  Carlo Wood.
  *
  * RSA-1024 0x624ACAD5 1997-01-26                    Sign & Encrypt
  * Fingerprint16 = 32 EC A7 B6 AC DB 65 A6  F6 F6 55 DD 1C DC FF 61
@@ -46,14 +46,14 @@ class AIReadWriteMutex
     AIReadWriteMutex() : m_readers_count(0), m_waiting_writers(0), m_rd2wr_count(0) { }
 
   private:
-    std::mutex m_state_mutex;					//!< Guards all member variables below.
-    std::condition_variable m_condition_unlocked;		//!< Condition variable used to wait for no readers or writers left (to tell waiting writers).
-    std::condition_variable m_condition_no_writer_left;		//!< Condition variable used to wait for no writers left (to tell waiting readers).
-    std::condition_variable m_condition_one_reader_left;	//!< Condition variable used to wait for one reader left (to tell that reader that it can become a writer).
-    std::condition_variable m_condition_rd2wr_count_zero;	//!< Condition variable used to wait until m_rd2wr_count is zero.
-    int m_readers_count;					//!< Number of readers or -1 if a writer locked this object.
-    int m_waiting_writers;					//!< Number of threads that are waiting for a write lock. Used to block readers from waking up.
-    int m_rd2wr_count;						//!< Number of threads that try to go from a read lock to a write lock.
+    std::mutex m_state_mutex;					///< Guards all member variables below.
+    std::condition_variable m_condition_unlocked;		///< Condition variable used to wait for no readers or writers left (to tell waiting writers).
+    std::condition_variable m_condition_no_writer_left;		///< Condition variable used to wait for no writers left (to tell waiting readers).
+    std::condition_variable m_condition_one_reader_left;	///< Condition variable used to wait for one reader left (to tell that reader that it can become a writer).
+    std::condition_variable m_condition_rd2wr_count_zero;	///< Condition variable used to wait until m_rd2wr_count is zero.
+    int m_readers_count;					///< Number of readers or -1 if a writer locked this object.
+    int m_waiting_writers;					///< Number of threads that are waiting for a write lock. Used to block readers from waking up.
+    int m_rd2wr_count;						///< Number of threads that try to go from a read lock to a write lock.
 
   public:
     void rdlock()
