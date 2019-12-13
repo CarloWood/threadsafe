@@ -32,6 +32,7 @@
 #include "utils/log2.h"
 #include "utils/macros.h"
 #include "utils/log2.h"
+#include "utils/print_using.h"
 #include "debug.h"
 #include <mutex>
 
@@ -194,7 +195,7 @@ class SpinSemaphore : public Futex<uint64_t>
 #endif
 
 #if CW_DEBUG
-    Dout(dc::semaphore, "Now " << print_using(prev_word + n, print_word_on));
+    Dout(dc::semaphore, "Now " << utils::print_using(prev_word + n, print_word_on));
     // Check for possible overflow.
     ASSERT(prev_ntokens + n <= tokens_mask);
 #endif
@@ -234,7 +235,7 @@ class SpinSemaphore : public Futex<uint64_t>
     do
     {
       uint64_t ntokens = word & tokens_mask;
-      Dout(dc::semaphore, print_using(word, print_word_on));
+      Dout(dc::semaphore, utils::print_using(word, print_word_on));
       // Are there any tokens to grab?
       if (ntokens == 0)
         return word;           // No debug output needed: if the above line prints tokens = 0 then this return is implied.
