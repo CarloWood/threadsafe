@@ -7,6 +7,14 @@ project( threadsafe
 include( AICxxProject )
 
 #==============================================================================
+# DEPENDENCIES
+#
+
+# This project uses header-only boost libraries:
+# aithreadsafe.h: #include <boost/math/common_factor.hpp>
+find_package( Boost REQUIRED )
+
+#==============================================================================
 # BUILD PROJECT
 #
 
@@ -44,7 +52,6 @@ get_target_property( CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_IN
 target_include_directories( threadsafe_ObjLib
     PUBLIC
         "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}" # For sys.h and debug.h.
-        "${CMAKE_CURRENT_BINARY_DIR}"           # For generated files like config.h.
 )
 
 # Require support for C++17.
@@ -55,7 +62,7 @@ target_compile_features( threadsafe_ObjLib
 # Set link dependencies.
 target_link_libraries( threadsafe_ObjLib
     PUBLIC
-        #Boost::boost
+        Boost::boost
         Threads::Threads
 )
 
@@ -69,5 +76,5 @@ endif ()
 # Create an ALIAS target.
 add_library( AICxx::threadsafe ALIAS threadsafe_ObjLib )
 
-# Prepend this object library to list.
+# Prepend this object library to the list.
 set( AICXX_OBJECTS_LIST AICxx::threadsafe ${AICXX_OBJECTS_LIST} CACHE INTERNAL "List of OBJECT libaries that this project uses." )
