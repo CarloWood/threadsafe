@@ -169,7 +169,10 @@ futex_sleep:
         }
         while (!m_word.compare_exchange_weak(word, new_word, std::memory_order_acquire) &&
                (ntokens = (word & tokens_mask)) > 0);
-        Dout(dc::finish, "Grabbed a token; no longer the spinner. Now " << utils::print_using(new_word, print_word_on));
+#ifdef CWDEBUG
+        if (ntokens > 0)
+          Dout(dc::finish, "Grabbed a token; no longer the spinner. Now " << utils::print_using(new_word, print_word_on));
+#endif
       }
       while (ntokens == 0);
       // We must wake up ntokens - 1 threads.
