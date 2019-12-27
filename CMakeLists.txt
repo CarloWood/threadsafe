@@ -1,18 +1,11 @@
 cmake_minimum_required( VERSION 3.12...3.16 )
 
 project( threadsafe
-         LANGUAGES C CXX
-         DESCRIPTION "Threading utilities: object oriented (read/write) locking and more" )
+         DESCRIPTION "Threading utilities: object oriented (read/write) locking and more"
+         LANGUAGES CXX
+)
 
 include( AICxxProject )
-
-#==============================================================================
-# DEPENDENCIES
-#
-
-# This project uses header-only boost libraries:
-# aithreadsafe.h: #include <boost/math/common_factor.hpp>
-find_package( Boost REQUIRED )
 
 #==============================================================================
 # BUILD PROJECT
@@ -62,16 +55,8 @@ target_compile_features( threadsafe_ObjLib
 # Set link dependencies.
 target_link_libraries( threadsafe_ObjLib
     PUBLIC
-        Boost::boost
-        Threads::Threads
+        AICxx::utils
 )
-
-if ( OptionEnableLibcwd )
-  target_link_libraries( threadsafe_ObjLib
-      PUBLIC
-          PkgConfig::Libcwd_r
-)
-endif ()
 
 # Create an ALIAS target.
 add_library( AICxx::threadsafe ALIAS threadsafe_ObjLib )
