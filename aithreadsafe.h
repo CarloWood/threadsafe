@@ -127,7 +127,7 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
-#include <boost/math/common_factor.hpp>
+#include <boost/integer/common_factor.hpp>
 
 #ifdef CWDEBUG
 #define THREADSAFE_DEBUG 1
@@ -143,7 +143,7 @@ class Bits
 {
   public:
     enum { size = ((sizeof(T) + blocksize - 1) / blocksize) * blocksize,	// sizeof(T) rounded up to multiple of blocksize.
-           alignment = boost::math::static_lcm<align, alignof(T)>::value };	// Properly aligned for T and aligned to 'align'.
+           alignment = boost::integer::static_lcm<align, alignof(T)>::value };	// Properly aligned for T and aligned to 'align'.
 
   private:
     // AIThreadSafe is a wrapper around an instance of T.
