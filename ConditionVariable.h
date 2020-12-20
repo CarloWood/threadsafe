@@ -35,6 +35,24 @@ namespace aithreadsafe
 
 // Like std::condition_variable but derived from AIMutex and using that as mutex.
 //
+// Usage:
+//
+// Declaration:
+//
+// using foo_type = aithreadsafe::Wrapper<Foo, aithreadsafe::policy::Primitive<aithreadsafe::ConditionVariable>>;
+// foo_type foo_cv;
+//
+// Waiting:
+//
+// foo_type::wat foo_w(foo_cv);
+// foo_w.wait([&](){ return foo_w->done(); });
+//
+// Notifying:
+//
+// foo_type::wat foo_w(foo_cv);
+// foo_w->set_done();
+// foo_w.notify_one();
+//
 class ConditionVariable : public AIMutex
 {
  private:
@@ -44,6 +62,15 @@ class ConditionVariable : public AIMutex
   template<typename Predicate>
   void wait(Predicate pred)
   {
+    // Usage:
+    //
+    // aithreadsafe::ConditionVariable cv;
+    //
+    //   cv.lock();
+    //   cv.wait([](){ return done; });
+    //   cv.unlock();
+    //
+    // For prefered usage, see above.
     ASSERT(is_self_locked());
     m_condition_variable.wait(*this, pred);
   }
