@@ -36,7 +36,8 @@
 #include "debug.h"
 #include <mutex>
 
-#define SPINSEMAPHORE_STATS
+// Define this to print some stats on semaphore usage.
+#undef SPINSEMAPHORE_STATS
 
 #if defined(CWDEBUG) && !defined(DOXYGEN)
 NAMESPACE_DEBUG_CHANNELS_START
