@@ -202,6 +202,8 @@ unsigned int SpinSemaphore::DelayLoop::s_inner_loop_size;
 
 void SpinSemaphore::DelayLoop::calibrate(std::atomic<uint64_t>& word)
 {
+  DoutEntering(dc::notice, "SpinSemaphore::DelayLoop::calibrate()");
+
   // Define delay loop lambdas. This requires C++17.
   utils::DelayLoopCalibration fixed_ols_delay_loop([&word](unsigned int ils){ return delay_loop(word, s_outer_loop_size, ils); });
   utils::DelayLoopCalibration fixed_ils_delay_loop([&word](unsigned int ols){ return delay_loop(word, ols, s_inner_loop_size); });
