@@ -58,22 +58,22 @@ class MpscQueue
 
   MpscNode* pop()
   {
-    mpscq_node_t* tail = m_tail;
-    mpscq_node_t* next = tail->m_next.load();
+    MpscNode* tail = m_tail;
+    MpscNode* next = tail->m_next.load();
     if (tail == &m_stub)
     {
       if (nullptr == next)
         return nullptr;
       m_tail = next;
       tail = next;
-      next = m_next->m_next.load();
+      next = next->m_next.load();
     }
     if (next)
     {
       m_tail = next;
       return tail;
     }
-    mpscq_node_t* head = m_head.load();
+    MpscNode* head = m_head.load();
     if (tail != head)
       return nullptr;
     push(&m_stub);
