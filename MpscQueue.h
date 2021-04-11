@@ -34,11 +34,62 @@
 
 #include <atomic>
 
+namespace aithreadsafe {
+
 struct MpscNode
 {
   std::atomic<MpscNode*> m_next;
 };
 
+// MpscQueue
+//
+// Empty list:
+//
+//   m_tail ---> m_stub ===> nullptr
+//                  ^
+//                  |
+//                m_head
+//
+// where '--->' means "points to the node",
+// and '===>' "is a node with an m_next pointer that points to".
+//
+// Apply one push on an empty list:
+//
+//   m_tail ---> m_stub ===> node1 ===> nullptr
+//                             ^
+//                             |
+//                           m_head
+//
+// A list with one or more nodes:
+//
+//   m_tail ---> [m_stub ===>] node1 ===> node2 ===> ... ===> nodeN ===> nullptr
+//                                                              ^
+//                                                              |
+//                                                            m_head
+//
+// If no pop was performed since the last time the list was empty,
+// then m_tail points to m_stub. If one or more pop's where performed
+// not leading to an empty list then m_tail points to the next node
+// that will be popped.
+//
+// Because the last line in push fixes the m_next pointer that m_head was
+// pointing at (from nullptr to the new node), a list that has a few nodes
+// pushed concurrently can also look like this:
+//
+//   m_tail ---> [m_stub ===>] node1 ===> node2 ===> ... ===> nodeK ===> nullptr, nodeL ===> nullptr, nodeM ===> nullptr, nodeN ===> nullptr
+//                                                                                                                          ^
+//                                                                                                                          |
+//                                                                                                                        m_head
+// Where the m_next pointers of nodes K, L and M are filled in "later" in any order, to end as
+//
+//   m_tail ---> [m_stub ===>] node1 ===> node2 ===> ... ===> nodeK ===> nodeL ===> nodeM ===> nodeN ===> nullptr
+//                                                                                               ^
+//                                                                                               |
+//                                                                                             m_head
+//
+// Hence, trying to pop a node that was already pushed might fail (returning nullptr) if
+// not all previous pushes also finished.
+//
 class MpscQueue
 {
  private:
@@ -47,12 +98,15 @@ class MpscQueue
   MpscNode               m_stub;
 
  public:
-  MpscQueue() : m_head(&m_stub), m_tail(&m_stub), m_stub{nullptr} { }
+  MpscQueue() : m_head(&m_stub), m_tail(&m_stub), m_stub{{nullptr}} { }
 
   void push(MpscNode* node)
   {
     node->m_next.store(nullptr);
     MpscNode* prev = std::atomic_exchange(&m_head, node);
+    // Here m_head points to the new node, which either points to null
+    // or already points to the NEXT node that was pushed AND completed, etc.
+    // Now fix the next pointer of the node that m_head was pointing at.
     prev->m_next.store(node);
   }
 
@@ -62,27 +116,59 @@ class MpscQueue
     MpscNode* next = tail->m_next.load();
     if (tail == &m_stub)
     {
+      // If m_tail ---> m_stub ===> nullptr, at the time of the above load(), then return nullptr.
+      // This is only the case for an empty list (or when the first push (determined by the first push
+      // that performed the atomic_exchange) to an empty list didn't complete yet).
       if (nullptr == next)
         return nullptr;
+      // Skip m_stub.
       m_tail = next;
       tail = next;
       next = next->m_next.load();
     }
+    // Are there at least two nodes in the list?
+    // Aka, m_tail ---> node1 ===> node2
     if (next)
     {
+      // Remove node and return it.
       m_tail = next;
       return tail;
     }
+    // If we get here we had the situation, at the time of the above load(), of
+    // m_tail ---> [m_stub ===>] node1 ===> nullptr and we now have
+    // tail ---> node1, where it at least very recently, node1 ===> nullptr.
     MpscNode* head = m_head.load();
+    // If head was changed in the meantime then a push is or was in progress
+    // and we fail to read node1 for now.
     if (tail != head)
       return nullptr;
+    // Make sure we have at least two nodes again.
     push(&m_stub);
+    // In the simplest case of no other races we now have:
+    //
+    //   tail ---> node1 ===> m_stub ===> nullptr
+    //                           ^
+    //                           |
+    //                         m_head
+    //
+    // If there where other, not yet completed pushes however, we
+    // can have a situation like this:
+    //
+    //   tail --->  node1 ===> nullptr, node2 ===> node3 ===> nullptr, m_stub ===> nullptr
+    //                                                                   ^
+    //                                                                   |
+    //                                                                 m_head
+    // where node2 was (incompletely) pushed before we pushed &m_stub.
+    // In that case this next will be null:
     next = tail->m_next.load();
     if (next)
     {
+      // Remove node and return it.
       m_tail = next;
       return tail;
     }
     return nullptr;
   }
 };
+
+} // namespace aithreadsafe
