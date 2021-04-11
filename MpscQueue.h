@@ -134,7 +134,8 @@ class MpscQueue
     {
       // If m_tail ---> m_stub ===> nullptr, at the time of the above load(), then return nullptr.
       // This is only the case for an empty list (or when the first push (determined by the first push
-      // that performed the atomic_exchange) to an empty list didn't complete yet).
+      // that performed the atomic_exchange) to an empty list, or the first push following the
+      // push(&m_stub) (see below), didn't complete yet).
       if (nullptr == next)
         return nullptr;
       // Skip m_stub.
@@ -152,7 +153,7 @@ class MpscQueue
     }
     // If we get here we had the situation, at the time of the above load(), of
     // m_tail ---> [m_stub ===>] node1 ===> nullptr and we now have
-    // tail ---> node1, where it at least very recently, node1 ===> nullptr.
+    // tail ---> node1; where, at least very recently, node1 ===> nullptr.
     MpscNode* head = m_head.load();
     // If head was changed in the meantime then a push is or was in progress
     // and we fail to read node1 for now.
@@ -167,8 +168,8 @@ class MpscQueue
     //                           |
     //                         m_head
     //
-    // If there where other, not yet completed pushes however, we
-    // can have a situation like this:
+    // If there where other - not yet completed - pushes however,
+    // we can have a situation like this:
     //
     //   tail --->  node1 ===> nullptr, node2 ===> node3 ===> nullptr, m_stub ===> nullptr
     //                                                                   ^
