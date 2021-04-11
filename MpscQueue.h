@@ -90,6 +90,22 @@ struct MpscNode
 // Hence, trying to pop a node that was already pushed might fail (returning nullptr) if
 // not all previous pushes also finished.
 //
+// This half finished list might get repaired in any order, so it might already be partially
+// linked. Also, due to concurrent execution of pop on a list with one element, and multiple pushes,
+// the most general unfinished state of the list might something like:
+//
+// m_tail ---> node3 [===> node4...] ===> nullptr, node5 [===> node6...] ===> nullptr, ..., nodeN ===> nullptr
+//                                                                                            ^
+//                                                                                            |
+//                                                                                          m_head
+//
+// where any of the nodes node4 or higher can be m_stub. Combining that with the
+// previous possibility where m_tail still points to m_stub from the beginning,
+// m_tail basically is a pointer to a possibly yet incompletely linked list of
+// nodes where zero or one node might be m_stub (which should be skipped when
+// encountered). Except for an empty list, because there has to be always at
+// least one node in the list; so in that case m_stub is always there.
+//
 class MpscQueue
 {
  private:
