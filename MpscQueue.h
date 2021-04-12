@@ -95,7 +95,7 @@ struct MpscNode
 //
 // This half finished list might get repaired in any order, so it might already be partially
 // linked. Also, due to concurrent execution of pop on a list with one element, and multiple pushes,
-// the most general unfinished state of the list might something like:
+// the most general unfinished state of the list might look something like:
 //
 // m_tail ---> node3 [===> node4...] ===> nullptr, node5 [===> node6...] ===> nullptr, ..., nodeN ===> nullptr
 //                                                                                            ^
@@ -120,16 +120,16 @@ struct MpscNode
 //
 // The consumer, that calls pop, is the only thread (or multiple threads
 // where a total ordering is already enforced and only one at a time calls
-// pop) so there is no modification order that could be different between
+// pop). So, there is no modification order that could be different between
 // two or more threads anyway.
 //
 // In other words, the std::atomic_exchange in push() has a total ordering
 // and determines the order in which nodes are pushed onto the queue.
 // The consumer will pop nodes in that order.
 //
-// At the time of writing, release-consume ordering is still is still being
-// discouraged as its specification is being revised (since C++17), so that
-// leaves release-acquire ordering.
+// At the time of writing, release-consume ordering is still being discouraged
+// (since C++17) as its specification is being revised, so that leaves
+// release-acquire ordering.
 //
 // Whenever a pointer to a node is returned by pop, the data that was written
 // to that node must be visible (you'd think that this is typical a release-consume
@@ -172,20 +172,20 @@ struct MpscNode
 // the top, get to the same point and load m_head again; this value is
 // now guaranteed to be unequal to the last value of m_head, and therefore
 // unequal to m_tail, because it is the very same thread that just stored
-// a value to m_head (by calling push(&m_stub).
+// a value to m_head (by calling push(&m_stub)).
 //
 // It is therefore perfectly fine to load the value of m_head with memory
 // order relaxed.
 //
 // The store of the nullptr in push() can also be memory order relaxed,
 // because we don't use anything that was written to memory before that
-// point. In most cases, when the value of nullptr is read, pop() just
+// store. In most cases, when the value of nullptr is read, pop() just
 // returns nullptr. In the one case that it doesn't, it pushes m_stub
-// a more or less starts over.
+// and more or less starts over.
 //
 // Finally, the atomic_exchange can be relaxed too, since it is ordered
 // with respect to itself anyway, and the only other instance where we
-// read it it is loaded with memory order relaxed.
+// read m_head that is loaded with memory order relaxed.
 //
 class MpscQueue
 {
