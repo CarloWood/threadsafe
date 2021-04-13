@@ -23,21 +23,12 @@ set_property(
 # The list of source files.
 target_sources(threadsafe_ObjLib
   PRIVATE
-    "aithreadid.cxx"
-    "Semaphore.cxx"
-    "SpinSemaphore.cxx"
-  
     "AIMutex.h"
     "AIReadWriteMutex.h"
     "AIReadWriteSpinLock.h"
-    "aithreadid.h"
-    "aithreadsafe.h"
     "ConditionVariable.h"
-    "Futex.h"
-    "Gate.h"
-    "Semaphore.h"
-    "SpinSemaphore.h"
-    "StartingGate.h"
+
+    "aithreadsafe.h"
 )
 
 # Required include search-paths.

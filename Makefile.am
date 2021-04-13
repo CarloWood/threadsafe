@@ -3,18 +3,12 @@ AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(srcdir)/.. -iquote $(top_srcdir)
 noinst_LTLIBRARIES = libthreadsafe.la
 
 libthreadsafe_la_SOURCES = \
-	aithreadsafe.h \
-	aithreadid.h \
-	aithreadid.cxx \
-	AIMutex.h \
-	AIReadWriteMutex.h \
-	AIReadWriteSpinLock.h \
-	Condition.h \
-	Futex.h \
-	Semaphore.h \
-	Semaphore.cxx \
-	SpinSemaphore.h \
-	SpinSemaphore.cxx
+    AIMutex.h
+    AIReadWriteMutex.h
+    AIReadWriteSpinLock.h
+    ConditionVariable.h
+\
+    aithreadsafe.h
 
 libthreadsafe_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 
