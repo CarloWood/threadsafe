@@ -90,7 +90,7 @@ class AIReadWriteMutex
     {
       std::unique_lock<std::mutex> lk(m_state_mutex);					// Get exclusive access.
       ++m_waiting_writers;								// Stop readers from being woken up.
-      m_condition_unlocked.wait(lk, [this]{return m_readers_count == 0;});		// Wait untill m_readers_count is 0 (nobody else has the lock).
+      m_condition_unlocked.wait(lk, [this]{return m_readers_count == 0;});		// Wait until m_readers_count is 0 (nobody else has the lock).
       --m_waiting_writers;
       m_readers_count = -1;								// We are a writer now.
     }
