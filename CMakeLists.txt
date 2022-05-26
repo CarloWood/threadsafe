@@ -23,10 +23,13 @@ set_property(
 # The list of source files.
 target_sources(threadsafe_ObjLib
   PRIVATE
+    "PointerStorage.cxx"
+
     "AIMutex.h"
     "AIReadWriteMutex.h"
     "AIReadWriteSpinLock.h"
     "ConditionVariable.h"
+    "PointerStorage.h"
 
     "aithreadsafe.h"
 )
