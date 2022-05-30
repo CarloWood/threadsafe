@@ -1,11 +1,13 @@
 #pragma once
 
+#include "AIReadWriteSpinLock.h"
 #include "utils/macros.h"
+#include <boost/lockfree/stack.hpp>
 #include <cstdint>
 #include <mutex>
 #include <vector>
 
-namespace utils::threading {
+namespace aithreadsafe {
 
 // Fast storage for pointers.
 //
@@ -104,14 +106,13 @@ class VoidPointerStorage
   static constexpr float memory_grow_factor = 1.414f;
 
  protected:
-  mutable std::mutex m_mutex;
+  mutable AIReadWriteSpinLock m_rwlock;
   index_type m_size;
-  index_type m_last_freed_index;
   std::vector<void*> m_storage;
-  std::vector<index_type> m_free_indices;
+  mutable boost::lockfree::stack<index_type> m_free_indices;
 
  public:
-  VoidPointerStorage(uint32_t initial_size) : m_size(0), m_last_freed_index(0)
+  VoidPointerStorage(uint32_t initial_size) : m_size(0), m_free_indices(initial_size)
   {
     increase_size(initial_size);
   }
@@ -120,30 +121,35 @@ class VoidPointerStorage
 
   index_type insert(void* value)
   {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (AI_UNLIKELY(m_last_freed_index == m_size))
+    m_rwlock.rdlock();
+    index_type index;
+    while (AI_UNLIKELY(!m_free_indices.pop(index)))
+    {
+      m_rwlock.rdunlock();
       increase_size();
-    index_type index = m_free_indices[m_last_freed_index++];
+      m_rwlock.rdlock();
+    }
     m_storage[index] = value;
+    m_rwlock.rdunlock();
     return index;
   }
 
   void erase(index_type pos)
   {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_free_indices[--m_last_freed_index] = pos;
+    m_rwlock.rdlock();
+    m_free_indices.bounded_push(pos);
+    m_rwlock.rdunlock();
   }
 
-  void* get(index_type pos)
+  void* get(index_type pos) const
   {
     return m_storage[pos];
   }
 
-  bool empty() const
-  {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_last_freed_index == 0;
-  }
+#ifdef CWDEBUG
+  // Extremely expensive function.
+  bool debug_empty() const;
+#endif
 };
 
 template<typename T>
@@ -160,12 +166,14 @@ struct PointerStorage : public VoidPointerStorage
 template<typename T>
 void PointerStorage<T>::copy(std::vector<T*>& output)
 {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  for (index_type i = m_last_freed_index; i < m_size; ++i)
-    m_storage[m_free_indices[i]] = nullptr;
+  m_rwlock.wrlock();
+  m_free_indices.consume_all([this](index_type index){
+    m_storage[index] = nullptr;
+  });
   for (void* ptr : m_storage)
     if (ptr)
       output.push_back(static_cast<T*>(ptr));
+  m_rwlock.wrunlock();
 }
 
-} // namespace utils::threading
+} // namespace aithreadsafe
