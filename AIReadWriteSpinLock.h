@@ -27,6 +27,11 @@
 
 #pragma once
 
+#ifdef CWDEBUG
+// Set to 1 to enable very extentive debug output with regard to this class.
+#define DEBUG_RWSPINLOCK 0
+#endif
+
 #include "utils/cpu_relax.h"
 #include "utils/macros.h"
 #include "debug.h"
@@ -34,6 +39,20 @@
 #include <condition_variable>
 #include <atomic>
 #include <thread>
+
+#ifdef CWDEBUG
+#if DEBUG_RWSPINLOCK
+#include <iomanip>
+#include <array>
+#define RWSLDout(a, b) Dout(a, b)
+#define RWSLDoutEntering(a, b) DoutEntering(a, b)
+#else
+#define RWSLDout(a, b) do { } while(0)
+#define RWSLDoutEntering(a, b) do { } while(0)
+#endif
+#else // CWDEBUG
+#define DEBUG_RWSPINLOCK 0
+#endif // CWDEBUG
 
 class AIReadWriteSpinLock
 {
@@ -77,11 +96,44 @@ class AIReadWriteSpinLock
   static constexpr int64_t one_wrunlock         = -one_wrlock;
   static constexpr int64_t one_wr2rdlock        = one_wrunlock + one_rdlock;
 
+#if DEBUG_RWSPINLOCK
+  struct Counters
+  {
+    std::array<int16_t, 4> counters;
+
+    friend std::ostream& operator<<(std::ostream& os, Counters const& counters)
+    {
+      os << '{' << -counters.counters[0] << ", " << counters.counters[1] << ", " << counters.counters[2] << ", " << counters.counters[3] << '}';
+      return os;
+    }
+  };
+
+  static Counters get_counters(int64_t state)
+  {
+    return {{ static_cast<int16_t>(state >> 48), static_cast<int16_t>(state >> 32), static_cast<int16_t>(state >> 16), static_cast<int16_t>(state) }};
+  }
+
+  static constexpr Counters get_counters_as_increment(int64_t increment)
+  {
+    int16_t R = static_cast<int16_t>(increment);
+    if (R < 0)
+      increment += w;
+    int16_t W = static_cast<int16_t>(increment >> 16);
+    if (W < 0)
+      increment += c;
+    int16_t C = static_cast<int16_t>(increment >> 32);
+    if (C < 0)
+      increment += v;
+    int16_t V = static_cast<int16_t>(increment >> 48);
+    return {{ V, C, W, R }};
+  }
+#endif
+
   std::atomic<int64_t> m_state;
-  std::mutex m_writer_present_cv_mutex;
-  std::condition_variable m_writer_present_cv;
-  std::mutex m_no_real_writer_present_cv_mutex;
-  std::condition_variable m_no_real_writer_present_cv;
+  std::mutex m_readers_cv_mutex;
+  std::condition_variable m_readers_cv;
+  std::mutex m_writers_cv_mutex;
+  std::condition_variable m_writers_cv;
 
   // This condition is used to detect if a reader is allowed to grab a read-lock.
   [[gnu::always_inline]] static constexpr bool writer_present(int64_t state)
@@ -182,7 +234,7 @@ class AIReadWriteSpinLock
     return (increment & (CW_mask | w / 2)) != (CW_mask | w / 2);
   }
 
-#ifdef CWDEBUG
+#if DEBUG_RWSPINLOCK
   // The sanity of all of the above is tested in AIReadWriteSpinLock_static_assert, see at the bottom of this file.
   friend struct AIReadWriteSpinLock_static_assert;
 #endif
@@ -190,6 +242,7 @@ class AIReadWriteSpinLock
   template<int64_t increment>
   [[gnu::always_inline]] int64_t do_transition()
   {
+    RWSLDoutEntering(dc::notice|continued_cf, "do_transition<" << get_counters_as_increment(increment) << ">() ");
     // This is a no-op.
     if constexpr (increment == 0)
     {
@@ -200,36 +253,59 @@ class AIReadWriteSpinLock
     // If the result of `writer_present` might to change from true to false, we should wake up possible threads that are waiting for that.
     else if constexpr (removes_writer(increment))
     {
+      bool writer_present_became_false;
       int64_t previous_state;
       {
-        std::lock_guard<std::mutex> lk(m_writer_present_cv_mutex);
+        std::lock_guard<std::mutex> lk(m_readers_cv_mutex);
+        RWSLDout(dc::notice, "m_readers_cv_mutex is locked.");
         if constexpr (!removes_real_writer(increment))
+        {
           previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+          RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
+          writer_present_became_false = writer_present(previous_state) && !writer_present(previous_state + increment);
+        }
         else
         {
           {
-            std::lock_guard<std::mutex> lk(m_no_real_writer_present_cv_mutex);
+            std::lock_guard<std::mutex> lk(m_writers_cv_mutex);
             previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+            RWSLDout(dc::finish, get_counters(previous_state) <<  " --> " << get_counters(previous_state + increment));
+            writer_present_became_false = writer_present(previous_state) && !writer_present(previous_state + increment);
           }
-          m_no_real_writer_present_cv.notify_one();
+          RWSLDout(dc::notice, "Calling m_writers_cv.notify_one()");
+          m_writers_cv.notify_one();
         }
+        RWSLDout(dc::notice, "Unlocking m_readers_cv_mutex...");
       }
-      m_writer_present_cv.notify_one();
+      if (writer_present_became_false)
+      {
+        RWSLDout(dc::notice, "Calling m_readers_cv.notify_all()");
+        m_readers_cv.notify_all();
+      }
+      else
+        RWSLDout(dc::notice, "Not calling notify_all() because writer_present() didn't change.");
       return previous_state;
     }
     else if constexpr (removes_real_writer(increment))
     {
       int64_t previous_state;
       {
-        std::lock_guard<std::mutex> lk(m_no_real_writer_present_cv_mutex);
+        std::lock_guard<std::mutex> lk(m_writers_cv_mutex);
         previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+        RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
       }
-      m_no_real_writer_present_cv.notify_one();
+      RWSLDout(dc::notice, "Calling m_writers_cv.notify_one()");
+      m_writers_cv.notify_one();
       return previous_state;
     }
     else
+    {
+      RWSLDout(dc::notice, "Not calling notify_one()");
       // This change might cause threads to leave their spin-loop, but no notify_one is required.
-      return m_state.fetch_add(increment, std::memory_order::relaxed);
+      int64_t previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+      RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
+      return previous_state;
+    }
   }
 
  public:
@@ -238,63 +314,94 @@ class AIReadWriteSpinLock
   // Fast path. Implement taking a read-lock with a single RMW operation.
   void rdlock()
   {
+    RWSLDoutEntering(dc::notice, "rdlock()");
     // Write locks have a higher priority in this class, therefore back-off any new read-lock
     // even when there are waiting writers (but no real succeeded write-lock yet).
+#if DEBUG_RWSPINLOCK
+    int64_t state;
+    if (AI_UNLIKELY(writer_present(state = do_transition<one_rdlock>())))
+      rdlock_blocked(state);
+#else
     if (AI_UNLIKELY(writer_present(do_transition<one_rdlock>())))
       rdlock_blocked();
+#endif
   }
 
   // Fast path. Implement releasing a read-lock with a single RMW operation.
   void rdunlock()
   {
+    RWSLDoutEntering(dc::notice, "rdunlock()");
     // If this results in R == 0 and there are waiting writers, then those have to pick that up by reading m_state in a spin loop.
     do_transition<one_rdunlock>();
   }
 
 private:
+#if DEBUG_RWSPINLOCK
+  void rdlock_blocked(int64_t state)
+#else
   void rdlock_blocked()
+#endif
   {
+    RWSLDoutEntering(dc::notice, "rdlock_blocked(" << get_counters(state) << ")");
     do
     {
+      RWSLDout(dc::notice, "Top of do/while loop.");
       // Apparently one or more threads are trying to obtain a write lock or one already has it.
       // Undo the increment of m_state.
       do_transition<failed_rdlock>();
 
       // Next we're going to wait until m_state becomes positive again.
       bool read_locked = false;
-      std::unique_lock<std::mutex> lk(m_writer_present_cv_mutex);
-      m_writer_present_cv.wait(lk, [this, &read_locked](){
+      RWSLDout(dc::notice, "Entering m_readers_cv.wait()");
+      std::unique_lock<std::mutex> lk(m_readers_cv_mutex);
+      RWSLDout(dc::notice, "m_readers_cv_mutex is locked.  Unlocking it...");
+      m_readers_cv.wait(lk, [this, &read_locked](){
+        RWSLDout(dc::notice, "Inside m_readers_cv.wait()'s lambda: m_readers_cv_mutex is locked.");
         int64_t state = 0; // If m_state is in the "unlocked" state (0), then replace it with one_rdlock (1).
         read_locked = m_state.compare_exchange_weak(state, one_rdlock, std::memory_order::relaxed, std::memory_order::relaxed);
+        RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(0, 1, ...) = " << read_locked);
         // If this returned true, then m_state was 0 and is now 1.
+#if DEBUG_RWSPINLOCK
+        if (read_locked)
+          RWSLDout(dc::finish, "; transition: " << get_counters(0) << " --> " << get_counters(one_rdlock));
+        else
+          RWSLDout(dc::finish, "; state was " << get_counters(state));
+#endif
         //
         // If it returned false and at the moment m_state is negative then we are still
         // write locked and it is safe to enter wait() again because we have the lock on
-        // m_writer_present_cv_mutex and therefore the condition variable is guaranteed to be notified
+        // m_readers_cv_mutex and therefore the condition variable is guaranteed to be notified
         // again.
         //
         // In other words: since this returns false when there are writers present, we must have
-        // m_writer_present_cv_mutex locked whenever we do a transition that removes a writer,
+        // m_readers_cv_mutex locked whenever we do a transition that removes a writer,
         // and do a notify_one after that.
+        RWSLDout(dc::notice, "Returning " << std::boolalpha << (read_locked || !writer_present(state)) << "; unlocking m_readers_cv_mutex...");
         return read_locked || !writer_present(state);
       });
+      RWSLDout(dc::notice, "Left m_readers_cv.wait() with read_locked = " << read_locked << "; m_readers_cv_mutex is locked.  Unlocking it.");
       // If read_locked was set, then we effectively added one_rdlock to m_state and we're done.
       if (read_locked)
         break;
     }
     while (writer_present(do_transition<one_rdlock>()));      // Try to get the read-lock again (see rdlock()) since we didn't obtain a read lock yet.
+    RWSLDout(dc::notice, "Leaving rdlock_blocked()");
   }
 
  public:
   void wrlock()
   {
+    RWSLDoutEntering(dc::notice, "wrlock()");
     // Taking a write lock should succeed only when no other thread has a read-lock or a write-lock.
     //
     // We also fail when nobody has a write-lock but there are (other) threads waiting on a write lock;
     // those should get a fair chance to get it since they were first. Aka, the "writer_present" here
     // has the same meaning as that of `writer_present`.
     if (no_reader_or_writer_present(do_transition<one_wrlock>()))
+    {
+      RWSLDout(dc::notice, "Success");
       return; // Success.
+    }
 
     do
     {
@@ -308,8 +415,10 @@ private:
       // traffic while the CPU waits for the lock (on architectures with a cache per CPU).
       // Nevertheless, we add a call to cpu_relax() in the loop because that is common practise and highly
       // recommended anyway (by the intel user manual) for performance reasons.
+      RWSLDout(dc::notice|continued_cf|flush_cf, "spinning... ");
       while (reader_present(state = m_state.load(std::memory_order::relaxed)))
         cpu_relax();
+      RWSLDout(dc::finish, "done (state = " << get_counters(state) << ")");
 
       // Even though a call to rdlock() might still shortly increment R, this is no longer
       // our concern: they will fail and subtract 1 again.
@@ -324,25 +433,37 @@ private:
       // appeared. Therefore we now will wait until there are no real-writers anymore (W == 0)
       // and also C and R are zero; and then attempt to get a write lock again.
 
-      // Note that m_no_real_writer_present_cv is notified each time W or C is decremented.
+      // Note that m_writers_cv is notified each time W or C is decremented.
       bool write_locked = false;
-      std::unique_lock<std::mutex> lk(m_no_real_writer_present_cv_mutex);
-      m_no_real_writer_present_cv.wait(lk, [this, state, &write_locked]() mutable {
+      RWSLDout(dc::notice, "Entering m_writers_cv.wait()");
+      std::unique_lock<std::mutex> lk(m_writers_cv_mutex);
+      RWSLDout(dc::notice, "m_writers_cv_mutex is locked.  Unlocking it...");
+      m_writers_cv.wait(lk, [this, state, &write_locked]() mutable {
+        RWSLDout(dc::notice, "Inside m_writers_cv.wait()'s lambda: m_writers_cv_mutex is locked.");
         state &= V_mask;        // Set C = W = R = 0.
         write_locked = m_state.compare_exchange_weak(state, state + finalize_wrlock, std::memory_order::relaxed, std::memory_order::relaxed);
+        RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(" << get_counters(state) << ", " << get_counters(state + finalize_wrlock) << ", ...) = " << write_locked);
         // If this returned true, then m_state was state (C == W == R == 0) and is now state + finalize_wrlock,
+#if DEBUG_RWSPINLOCK
+        if (write_locked)
+          RWSLDout(dc::finish, "; transition: " << get_counters(state) << " --> " << get_counters(state + finalize_wrlock));
+        else
+          RWSLDout(dc::finish, "; state was " << get_counters(state));
+#endif
         // which means we successfully obtained a write lock.
         //
         // If it returned false and at the moment W or C are larger than zero, then it is
-        // safe to enter wait() again because we have the lock on m_no_real_writer_present_cv_mutex
+        // safe to enter wait() again because we have the lock on m_writers_cv_mutex
         // and therefore it is guaranteed that the condition variable will be notified again when
         // either changes towards zero.
         //
         // In other words: since this returns false when there were real writers present, we must
-        // have m_no_real_writer_present_cv_mutex locked whenever we do a transition that removes a
+        // have m_writers_cv_mutex locked whenever we do a transition that removes a
         // real writer.
+        RWSLDout(dc::notice, "Returning " << std::boolalpha << (write_locked || no_real_writer_present(state)) << "; unlocking m_writers_cv_mutex...");
         return write_locked || no_real_writer_present(state);
       });
+      RWSLDout(dc::notice, "Left m_writers_cv.wait() with write_locked = " << write_locked << "; m_writers_cv_mutex is locked.  Unlocking it.");
       // If write_locked was set, then we effectively added one_wrlock to m_state and we're done.
       if (write_locked)
         break;
@@ -354,6 +475,7 @@ private:
       // Now we no longer care about the value of V however: we will grab the write lock regardless.
     }
     while (reader_or_real_writer_present(do_transition<finalize_wrlock>()));
+    RWSLDout(dc::notice, "Leaving wrlock()");
   }
 
   void rd2wrlock()
@@ -370,16 +492,18 @@ private:
 
   void wrunlock()
   {
+    RWSLDoutEntering(dc::notice, "wrunlock()");
     do_transition<one_wrunlock>();
   }
 
   void wr2rdlock()
   {
+    RWSLDoutEntering(dc::notice, "wr2rdlock()");
     do_transition<one_wr2rdlock>();
   }
 };
 
-#ifdef CWDEBUG
+#if DEBUG_RWSPINLOCK
 // Absolutely ridiculous - but the whole class definition must be finished
 // before you can use a static constexpr member function in a static_assert?!
 struct AIReadWriteSpinLock_static_assert : AIReadWriteSpinLock
@@ -432,4 +556,8 @@ struct AIReadWriteSpinLock_static_assert : AIReadWriteSpinLock
       writer_present(one_rdlock + one_rd2wrlock + failed_rdlock + failed_rd2wrlock) &&
       "writer_present logic error - depth 2 with two failures");
 };
+
+#undef RWSLDout
+#undef RWSLDoutEntering
+
 #endif
