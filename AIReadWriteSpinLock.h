@@ -28,7 +28,7 @@
 #pragma once
 
 #ifdef CWDEBUG
-// Set to 1 to enable very extentive debug output with regard to this class.
+// Set to 1 to enable very extentive debug output with regard to this class; as well as enable static_asserts at the end.
 #define DEBUG_RWSPINLOCK 0
 #endif
 
@@ -74,9 +74,10 @@ class AIReadWriteSpinLock
 
   // The bits used for R.
   static constexpr int64_t R_mask = w - 1;
-  static constexpr int64_t W_mask = (c - 1) & ~R_mask;
-  static constexpr int64_t CW_mask = (v - 1) & ~R_mask;
-  static constexpr int64_t V_mask = ~int64_t{1} & ~(CW_mask | R_mask);
+  static constexpr int64_t W_mask = R_mask << shift;
+  static constexpr int64_t C_mask = W_mask << shift;
+  static constexpr int64_t CW_mask = C_mask | W_mask;
+  static constexpr int64_t V_mask = C_mask << shift;
 
   // Possible transitions.
   static constexpr int64_t one_rdlock           =      1;
@@ -136,56 +137,69 @@ class AIReadWriteSpinLock
   std::condition_variable m_writers_cv;
 
   // This condition is used to detect if a reader is allowed to grab a read-lock.
+  //
+  // Returns true if there is an actual writer (W > 0), but also when there are
+  // threads that are waiting to get a write lock. All those threads have V decremented.
   [[gnu::always_inline]] static constexpr bool writer_present(int64_t state)
   {
     // See the use of -v above.
     return state < 0;
   }
 
-  // This condition is used to detect if a writer is allowed to grab a write-lock.
-  [[gnu::always_inline]] static constexpr bool no_reader_or_writer_present(int64_t state)
+  // This condition is used to detect if a (waiting) writer is allowed to grab a write-lock.
+  //
+  // Returns true only when there are no readers (R = 0) and no (waiting) writers (V == 0,
+  // which implies that W == 0 and C == 0).
+  [[gnu::always_inline]] static constexpr bool reader_or_writer_present(int64_t state)
   {
     // No read-lock or write-locks are allowed: R = 0 and W = 0. But also no waiting writers.
-    return state == 0;
+    return state != 0;
   }
 
   // This condition is used to detect if a spinning writer can proceed with waiting for other writers,
-  // and no longer worry about readers.
+  // and no longer worry about readers (at the moment).
+  //
+  // Returns true when R is larger than zero.
   [[gnu::always_inline]] static constexpr bool reader_present(int64_t state)
   {
+    // Note that R can't be negative.
     return (state & R_mask) != 0;
   }
 
   // This condition is used to detect if a writer has to wait for other writers before it can grab the write-lock.
   // That includes the C count, because threads that try to convert their read-lock into a write-lock have
   // a higher priority (after all, we can't get a write-lock while they have their read-lock, so there is no other way).
-  [[gnu::always_inline]] static constexpr bool no_real_writer_present(int64_t state)
+  //
+  // Returns true when either C or W is larger than zero.
+  [[gnu::always_inline]] static constexpr bool converting_or_actual_writer_present(int64_t state)
   {
-    return (state & CW_mask) == 0;
+    // Note that C and W can't be negative.
+    return (state & CW_mask) != 0;
   }
 
   // This condition is used to detect if a writer is allowed to grab a write-lock after having already waited for other writers a bit.
-  [[gnu::always_inline]] static constexpr bool reader_or_real_writer_present(int64_t state)
+  //
+  // It returns true iff reader_present or converting_or_actual_writer_present.
+  [[gnu::always_inline]] static constexpr bool reader_or_converting_or_actual_writer_present(int64_t state)
   {
     return (state & (R_mask | CW_mask)) != 0;
   }
 
-  // This test is used in do_transition and tests if adding `increment` to m_state can cause a (waiting) writer to be removed.
-  // Since real writers also have V decremented, it is sufficient to only look for a positve value of V here.
-  // The division by 2 is necessary because a negative increment of C (or W if C == 0, etc) could have borrowed from V.
-  // In that case V would be 0, but the high bit of C would be set.
-  [[gnu::always_inline]] static constexpr bool removes_writer(int64_t increment)
-  {
-    return increment >= v / 2;
-  }
-
-  // Used in removes_real_writer.
+  // Used in removes_converting_or_actual_writer.
   static constexpr int64_t sign_bit_c = c << (shift - 1);
   static constexpr int64_t sign_bit_w = w << (shift - 1);
 
-  // This test is used in do_transition and tests if adding `increment` to m_state can cause a real writer to be removed.
-  // "Real writers" here means literally that their removal might change the value of no_real_writer_present from false to true.
-  [[gnu::always_inline]] static constexpr bool removes_real_writer(int64_t increment)
+  // This test is used in do_transition and tests if adding `increment` to m_state can cause a (waiting) writer to be removed.
+  // Returns true if C < 0 || W < 0.
+  [[gnu::always_inline]] static constexpr bool removes_writer(int64_t increment)
+  {
+    return ((increment & sign_bit_c) && (increment & (C_mask | c / 2)) != (C_mask | c / 2)) ||
+           ((increment & sign_bit_w) && (increment & (W_mask | w / 2)) != (W_mask | w / 2));
+  }
+
+  // This test is used in do_transition and tests if adding `increment` to m_state can cause a converting/actual writer to be removed.
+  // "Real writers" here means literally that their removal might change the value of converting_or_actual_writer_present from true to false.
+  [[gnu::always_inline]] static constexpr bool removes_converting_or_actual_writer(int64_t increment)
   {
     // This sign_bit must always be set, because either C is negative,
     // or C is "zero" but W is negative, borrowing 1 from C making it
@@ -235,6 +249,57 @@ class AIReadWriteSpinLock
   }
 
 #if DEBUG_RWSPINLOCK
+  static constexpr int64_t make_state(std::array<int64_t, 4> const& s)
+  {
+    std::array<int64_t, 4> const b = { v, c, w, r };
+    int64_t res = 0;
+    for (int i = 0; i < 4; ++i)
+    {
+      int64_t sign = (s[i] < 1) ? -1UL : 1UL;
+      for (int j = 0; j < sign * s[i]; ++j)
+        res += sign * b[i];
+    }
+    return res;
+  }
+
+  static constexpr bool test_removes_converting_or_actual_writer()
+  {
+    for (int v = -1; v <= 1; ++v)
+      for (int c = -2; c <= 2; ++c)
+        for (int w = -2; w <= 2; ++w)
+          for (int r = -2; r <= 2; ++r)
+          {
+            // All transitions do c and v, or w and v in pairs.
+            std::array<int64_t, 4> s = { v - c - w, c, w, r };
+            bool expected = (c < 0 || w < 0) && !(c > 0 || w > 0);
+            int64_t increment = make_state(s);
+            if (removes_converting_or_actual_writer(increment) != expected)
+              return false;
+          }
+    return true;  // Success.
+  }
+
+  static constexpr bool test_removes_writer()
+  {
+    for (int v = -1; v <= 1; ++v)
+      for (int c = -2; c <= 2; ++c)
+        for (int w = -2; w <= 2; ++w)
+          for (int r = -2; r <= 2; ++r)
+          {
+            // All transitions do c and v, or w and v in pairs.
+            std::array<int64_t, 4> s = { v - c - w, c, w, r };
+            bool expected = c < 0 || w < 0;
+            int64_t increment = make_state(s);
+            if (removes_writer(increment) != expected)
+            {
+              //std::cout << "Error: " << std::dec << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; " <<
+              //  std::hex << std::setfill('0') << std::setw(16) << increment << "; expected: " << std::boolalpha << expected << std::endl;
+              return false;
+            }
+          }
+    return true;  // Success.
+  }
+
   // The sanity of all of the above is tested in AIReadWriteSpinLock_static_assert, see at the bottom of this file.
   friend struct AIReadWriteSpinLock_static_assert;
 #endif
@@ -258,7 +323,7 @@ class AIReadWriteSpinLock
       {
         std::lock_guard<std::mutex> lk(m_readers_cv_mutex);
         RWSLDout(dc::notice, "m_readers_cv_mutex is locked.");
-        if constexpr (!removes_real_writer(increment))
+        if constexpr (!removes_converting_or_actual_writer(increment))
         {
           previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
           RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
@@ -286,7 +351,7 @@ class AIReadWriteSpinLock
         RWSLDout(dc::notice, "Not calling notify_all() because writer_present() didn't change.");
       return previous_state;
     }
-    else if constexpr (removes_real_writer(increment))
+    else if constexpr (removes_converting_or_actual_writer(increment))
     {
       int64_t previous_state;
       {
@@ -360,22 +425,21 @@ private:
         int64_t state = 0; // If m_state is in the "unlocked" state (0), then replace it with one_rdlock (1).
         read_locked = m_state.compare_exchange_weak(state, one_rdlock, std::memory_order::relaxed, std::memory_order::relaxed);
         RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(0, 1, ...) = " << read_locked);
-        // If this returned true, then m_state was 0 and is now 1.
+        // If this returned true, then m_state was 0 and is now 1,
+        // which means we successfully obtained a read lock.
+        //
+        // If it returned false and at the moment V is negative then we are still write locked
+        // and it is safe to enter wait() again because we have the lock on m_readers_cv_mutex
+        // and therefore the condition variable is guaranteed to be notified again.
 #if DEBUG_RWSPINLOCK
         if (read_locked)
           RWSLDout(dc::finish, "; transition: " << get_counters(0) << " --> " << get_counters(one_rdlock));
         else
           RWSLDout(dc::finish, "; state was " << get_counters(state));
 #endif
-        //
-        // If it returned false and at the moment m_state is negative then we are still
-        // write locked and it is safe to enter wait() again because we have the lock on
-        // m_readers_cv_mutex and therefore the condition variable is guaranteed to be notified
-        // again.
-        //
-        // In other words: since this returns false when there are writers present, we must have
-        // m_readers_cv_mutex locked whenever we do a transition that removes a writer,
-        // and do a notify_one after that.
+        // In other words: since the following returns false when there are writers present,
+        // we must have m_readers_cv_mutex locked whenever we do a transition that removes
+        // a writer - and do a notify_all after that.
         RWSLDout(dc::notice, "Returning " << std::boolalpha << (read_locked || !writer_present(state)) << "; unlocking m_readers_cv_mutex...");
         return read_locked || !writer_present(state);
       });
@@ -397,7 +461,7 @@ private:
     // We also fail when nobody has a write-lock but there are (other) threads waiting on a write lock;
     // those should get a fair chance to get it since they were first. Aka, the "writer_present" here
     // has the same meaning as that of `writer_present`.
-    if (no_reader_or_writer_present(do_transition<one_wrlock>()))
+    if (!reader_or_writer_present(do_transition<one_wrlock>()))
     {
       RWSLDout(dc::notice, "Success");
       return; // Success.
@@ -444,37 +508,36 @@ private:
         write_locked = m_state.compare_exchange_weak(state, state + finalize_wrlock, std::memory_order::relaxed, std::memory_order::relaxed);
         RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(" << get_counters(state) << ", " << get_counters(state + finalize_wrlock) << ", ...) = " << write_locked);
         // If this returned true, then m_state was state (C == W == R == 0) and is now state + finalize_wrlock,
-#if DEBUG_RWSPINLOCK
-        if (write_locked)
-          RWSLDout(dc::finish, "; transition: " << get_counters(state) << " --> " << get_counters(state + finalize_wrlock));
-        else
-          RWSLDout(dc::finish, "; state was " << get_counters(state));
-#endif
         // which means we successfully obtained a write lock.
         //
         // If it returned false and at the moment W or C are larger than zero, then it is
         // safe to enter wait() again because we have the lock on m_writers_cv_mutex
         // and therefore it is guaranteed that the condition variable will be notified again when
         // either changes towards zero.
-        //
-        // In other words: since this returns false when there were real writers present, we must
-        // have m_writers_cv_mutex locked whenever we do a transition that removes a
-        // real writer.
-        RWSLDout(dc::notice, "Returning " << std::boolalpha << (write_locked || no_real_writer_present(state)) << "; unlocking m_writers_cv_mutex...");
-        return write_locked || no_real_writer_present(state);
+#if DEBUG_RWSPINLOCK
+        if (write_locked)
+          RWSLDout(dc::finish, "; transition: " << get_counters(state) << " --> " << get_counters(state + finalize_wrlock));
+        else
+          RWSLDout(dc::finish, "; state was " << get_counters(state));
+#endif
+        // In other words: since the following returns false when there were converting/actual writers present,
+        // we must have m_writers_cv_mutex locked whenever we do a transition that removes a converting/actual
+        // writer - and do a notify_one after that.
+        RWSLDout(dc::notice, "Returning " << std::boolalpha << (write_locked || !converting_or_actual_writer_present(state)) << "; unlocking m_writers_cv_mutex...");
+        return write_locked || !converting_or_actual_writer_present(state);
       });
       RWSLDout(dc::notice, "Left m_writers_cv.wait() with write_locked = " << write_locked << "; m_writers_cv_mutex is locked.  Unlocking it.");
       // If write_locked was set, then we effectively added one_wrlock to m_state and we're done.
       if (write_locked)
         break;
-      // If we get here then no_real_writer_present(state) was true, which means W == C == 0,
+      // If we get here then converting_or_actual_writer_present(state) was false, which means W == C == 0,
       // but m_state was not equal to the value passed as first argument, with W == C == R == 0.
       // This can mean that R > 0 (there are now readers that we have to wait for again) and/or
       // that V changed (ie, another thread did one_wrlock and failed_wrlock).
       // In neither case we can rely on the condition variable, so it is correct that we left wait().
       // Now we no longer care about the value of V however: we will grab the write lock regardless.
     }
-    while (reader_or_real_writer_present(do_transition<finalize_wrlock>()));
+    while (reader_or_converting_or_actual_writer_present(do_transition<finalize_wrlock>()));
     RWSLDout(dc::notice, "Leaving wrlock()");
   }
 
@@ -504,6 +567,10 @@ private:
 };
 
 #if DEBUG_RWSPINLOCK
+
+#undef RWSLDout
+#undef RWSLDoutEntering
+
 // Absolutely ridiculous - but the whole class definition must be finished
 // before you can use a static constexpr member function in a static_assert?!
 struct AIReadWriteSpinLock_static_assert : AIReadWriteSpinLock
@@ -512,7 +579,7 @@ struct AIReadWriteSpinLock_static_assert : AIReadWriteSpinLock
   static constexpr int64_t one_waiting_converter = c;
 
   //===========================================================================================================
-  // Test writer_present; this includes waiting writers: anything that should prehibit new rdlock()'s to block.
+  // Test writer_present; this includes waiting writers: anything that should cause new rdlock()'s to block.
 
   // Test single transitions.
   static_assert(
@@ -552,12 +619,64 @@ struct AIReadWriteSpinLock_static_assert : AIReadWriteSpinLock
   static_assert(
      !writer_present(one_rdlock + one_rdlock + failed_rdlock + failed_rdlock) &&
       writer_present(one_rdlock + one_wrlock + failed_rdlock + failed_wrlock) &&
-      writer_present(one_wrlock + one_wrlock + failed_wrlock + failed_wrlock) &&
-      writer_present(one_rdlock + one_rd2wrlock + failed_rdlock + failed_rd2wrlock) &&
+      writer_present(one_wrlock + one_wrlock + failed_wrlock + failed_wrlock),
       "writer_present logic error - depth 2 with two failures");
-};
 
-#undef RWSLDout
-#undef RWSLDoutEntering
+  // Test tripple transition.
+  static_assert(
+      writer_present(one_rdlock + one_wrlock + one_rd2wrlock),
+      "writer_present logic error - depth 3");
+
+  //===========================================================================================================
+  // Test converting_or_actual_writer_present; this includes converting writers: anything that should cause new wrlock()'s to block.
+
+  // Test single transitions.
+  static_assert(
+     !converting_or_actual_writer_present(one_rdlock) &&
+      converting_or_actual_writer_present(one_wrlock),
+      "converting_or_actual_writer_present logic error - depth 1");
+
+  // Test double transitions.
+  static_assert(
+     !converting_or_actual_writer_present(one_rdlock + one_rdlock) &&
+      converting_or_actual_writer_present(one_rdlock + one_wrlock) &&
+      converting_or_actual_writer_present(one_wrlock + one_wrlock) &&
+      converting_or_actual_writer_present(one_rdlock + one_rd2wrlock) &&
+      converting_or_actual_writer_present(one_rdlock + one_rd2wrlock + successful_rd2wrlock),
+      "converting_or_actual_writer_present logic error - depth 2");
+
+  // Test single transitions with failure.
+  static_assert(
+     !converting_or_actual_writer_present(one_rdlock + failed_rdlock) &&
+     !converting_or_actual_writer_present(one_wrlock + failed_wrlock),
+      "converting_or_actual_writer_present logic error - depth 1 with failure");
+
+  // Test double transitions with one failure.
+  static_assert(
+     !converting_or_actual_writer_present(one_rdlock + one_rdlock + failed_rdlock) &&
+      converting_or_actual_writer_present(one_rdlock + one_wrlock + failed_rdlock) &&
+     !converting_or_actual_writer_present(one_rdlock + one_wrlock + failed_wrlock) &&
+      converting_or_actual_writer_present(one_wrlock + one_wrlock + failed_wrlock) &&
+      converting_or_actual_writer_present(one_rdlock + one_rd2wrlock + failed_rd2wrlock),
+      "converting_or_actual_writer_present logic error - depth 2 with one failure");
+
+  // Test double transitions with two failures.
+  static_assert(
+     !converting_or_actual_writer_present(one_rdlock + one_rdlock + failed_rdlock + failed_rdlock) &&
+     !converting_or_actual_writer_present(one_rdlock + one_wrlock + failed_rdlock + failed_wrlock) &&
+     !converting_or_actual_writer_present(one_wrlock + one_wrlock + failed_wrlock + failed_wrlock),
+      "converting_or_actual_writer_present logic error - depth 2 with two failures");
+
+  // Test tripple transition.
+  static_assert(
+      converting_or_actual_writer_present(one_rdlock + one_wrlock + one_rd2wrlock),
+      "writer_present logic error - depth 3");
+
+  //===========================================================================================================
+  // do_transition tests.
+
+  static_assert(test_removes_converting_or_actual_writer(), "removes_converting_or_actual_writer is broken!");
+  static_assert(test_removes_writer(), "removes_writer is broken!");
+};
 
 #endif
