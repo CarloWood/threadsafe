@@ -51,9 +51,20 @@
 #define RWSLDout(a, b) do { } while(0)
 #define RWSLDoutEntering(a, b) do { } while(0)
 #endif
+#ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
+#include "ThreadPermuter.h"
+#endif
 #else // CWDEBUG
 #define DEBUG_RWSPINLOCK 0
+#undef DEBUG_RWSPINLOCK_THREADPERMUTER
 #endif // CWDEBUG
+
+#ifndef DEBUG_RWSPINLOCK_THREADPERMUTER
+#undef TPY
+#undef TPB
+#define TPY
+#define TPB
+#endif
 
 class AIReadWriteSpinLock
 {
@@ -135,11 +146,19 @@ class AIReadWriteSpinLock
   }
 #endif
 
+#ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
+  using mutex_t = thread_permuter::Mutex;
+  using condition_variable_t = thread_permuter::ConditionVariable;
+#else
+  using mutex_t = std::mutex;
+  using condition_variable_t = std::condition_variable;
+#endif
+
   std::atomic<int64_t> m_state;
-  std::mutex m_readers_cv_mutex;
-  std::condition_variable m_readers_cv;
-  std::mutex m_writers_cv_mutex;
-  std::condition_variable m_writers_cv;
+  mutex_t m_readers_cv_mutex;
+  condition_variable_t m_readers_cv;
+  mutex_t m_writers_cv_mutex;
+  condition_variable_t m_writers_cv;
 
   // This condition is used to detect if a reader is allowed to grab a read-lock.
   //
@@ -351,20 +370,22 @@ class AIReadWriteSpinLock
       bool writer_present_became_false;
       int64_t previous_state;
       {
-        std::lock_guard<std::mutex> lk(m_readers_cv_mutex);
+        std::lock_guard<mutex_t> lk(m_readers_cv_mutex);
         RWSLDout(dc::notice, "m_readers_cv_mutex is locked.");
         if constexpr (!removes_converting_or_actual_writer(increment))
         {
           previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
           RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
+          TPY;
           writer_present_became_false = writer_present(previous_state) && !writer_present(previous_state + increment);
         }
         else
         {
           {
-            std::lock_guard<std::mutex> lk(m_writers_cv_mutex);
+            std::lock_guard<mutex_t> lk(m_writers_cv_mutex);
             previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
             RWSLDout(dc::finish, get_counters(previous_state) <<  " --> " << get_counters(previous_state + increment));
+            TPY;
             writer_present_became_false = writer_present(previous_state) && !writer_present(previous_state + increment);
           }
           RWSLDout(dc::notice, "Calling m_writers_cv.notify_one()");
@@ -385,9 +406,10 @@ class AIReadWriteSpinLock
     {
       int64_t previous_state;
       {
-        std::lock_guard<std::mutex> lk(m_writers_cv_mutex);
+        std::lock_guard<mutex_t> lk(m_writers_cv_mutex);
         previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
         RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
+        TPY;
       }
       RWSLDout(dc::notice, "Calling m_writers_cv.notify_one()");
       m_writers_cv.notify_one();
@@ -399,6 +421,7 @@ class AIReadWriteSpinLock
       // This change might cause threads to leave their spin-loop, but no notify_one is required.
       int64_t previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
       RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
+      TPY;
       return previous_state;
     }
   }
@@ -448,12 +471,13 @@ private:
       // Next we're going to wait until m_state becomes positive again.
       bool read_locked = false;
       RWSLDout(dc::notice, "Entering m_readers_cv.wait()");
-      std::unique_lock<std::mutex> lk(m_readers_cv_mutex);
+      std::unique_lock<mutex_t> lk(m_readers_cv_mutex);
       m_readers_cv.wait(lk, [this, &read_locked](){
         RWSLDout(dc::notice, "Inside m_readers_cv.wait()'s lambda; m_readers_cv_mutex is locked.");
         int64_t state = 0; // If m_state is in the "unlocked" state (0), then replace it with one_rdlock (1).
         read_locked = m_state.compare_exchange_weak(state, one_rdlock, std::memory_order::relaxed, std::memory_order::relaxed);
         RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(0, 1, ...) = " << read_locked);
+        TPY;
         // If this returned true, then m_state was 0 and is now 1,
         // which means we successfully obtained a read lock.
         //
@@ -510,7 +534,10 @@ private:
       // recommended anyway (by the intel user manual) for performance reasons.
       RWSLDout(dc::notice|continued_cf|flush_cf, "spinning... ");
       while (reader_present(state = m_state.load(std::memory_order::relaxed)))
+      {
         cpu_relax();
+        TPB;
+      }
       RWSLDout(dc::finish, "done (state = " << get_counters(state) << ")");
 
       // Even though a call to rdlock() might still shortly increment R, this is no longer
@@ -529,12 +556,13 @@ private:
       // Note that m_writers_cv is notified each time W or C is decremented.
       bool write_locked = false;
       RWSLDout(dc::notice, "Entering m_writers_cv.wait()");
-      std::unique_lock<std::mutex> lk(m_writers_cv_mutex);
+      std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
       m_writers_cv.wait(lk, [this, state, &write_locked]() mutable {
         RWSLDout(dc::notice, "Inside m_writers_cv.wait()'s lambda; m_writers_cv_mutex is locked.");
         state &= V_mask;        // Demand C = W = R = 0.
         write_locked = m_state.compare_exchange_weak(state, state + finalize_wrlock, std::memory_order::relaxed, std::memory_order::relaxed);
         RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(" << get_counters(state) << ", " << get_counters(state + finalize_wrlock) << ", ...) = " << write_locked);
+        TPY;
         // If this returned true, then m_state was state (C == W == R == 0) and is now state + finalize_wrlock,
         // which means we successfully obtained a write lock.
         //
@@ -597,12 +625,15 @@ private:
     // From now on no new reader or writer will succeed. Begin with spinning until all, other, current readers are gone.
     RWSLDout(dc::notice|continued_cf|flush_cf, "spinning... ");
     while (other_readers_present(state = m_state.load(std::memory_order::relaxed)))
+    {
       cpu_relax();
+      TPB;
+    }
     RWSLDout(dc::finish, "done (state = " << get_counters(state) << ")");
 
     RWSLDout(dc::notice, "Entering m_writers_cv.wait()");
     {
-      std::unique_lock<std::mutex> lk(m_writers_cv_mutex);
+      std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
       // Finally, wait until a possible actual writer released their write-lock.
       // Note that m_writers_cv is notified each time W or C is decremented.
       // C == 1 (this thread) and will not be decremented to zero; so we can use the same condition variable.
@@ -620,9 +651,13 @@ private:
           else
             RWSLDout(dc::finish, "; state was " << get_counters(state));
 #endif
+#ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
+          if (!write_locked && !actual_writer_present(state))
+            TPB;
+#endif
         }
         while (!write_locked && !actual_writer_present(state)); // Only exit this loop if we succeeded to get the write-lock, or when there
-                                                                // is an actual writer present that we can wait for with the condition variable.
+        TPY;                                                    // is an actual writer present that we can wait for with the condition variable.
 
         // Here, either `write_locked` is true and we succeeded (and will leave this function), or
         // actual_writer_present(state) is true. In that case it is safe to return false and continue
@@ -640,11 +675,15 @@ private:
   void rd2wryield()
   {
     RWSLDoutEntering(dc::notice, "rd2wryield()");
+#ifndef DEBUG_RWSPINLOCK_THREADPERMUTER
     std::this_thread::yield();
+#endif
     // Wait until C became zero again.
-    std::unique_lock<std::mutex> lk(m_writers_cv_mutex);
+    std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
     m_writers_cv.wait(lk, [this](){
-      return !converting_writer_present(m_state.load(std::memory_order::relaxed));
+      bool leave_rd2wryield = !converting_writer_present(m_state.load(std::memory_order::relaxed));
+      TPY;
+      return leave_rd2wryield;
     });
   }
 
