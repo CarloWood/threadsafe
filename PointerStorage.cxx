@@ -6,7 +6,7 @@ namespace aithreadsafe {
 
 void VoidPointerStorage::increase_size(uint32_t initial_size)
 {
-  m_rwlock.wrlock();
+  m_rwlock.rd2wrlock(); // This might throw if another thread is already trying to convert its read lock into a write lock.
 
   index_type size = m_size;
   m_size = std::max(static_cast<index_type>(initial_size), static_cast<index_type>(memory_grow_factor * size));
@@ -37,7 +37,7 @@ void VoidPointerStorage::increase_size(uint32_t initial_size)
   }
 //  Dout(dc::finish, '.');
 
-  m_rwlock.wrunlock();
+  m_rwlock.wr2rdlock();
 }
 
 #ifdef CWDEBUG

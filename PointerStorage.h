@@ -148,16 +148,25 @@ class VoidPointerStorage
 
   index_type insert(void* value)
   {
-    m_rwlock.rdlock();
     index_type index;
-    while (AI_UNLIKELY(!m_free_indices.pop(index)))
+    for (;;)
     {
-      m_rwlock.rdunlock();
-      increase_size();
       m_rwlock.rdlock();
+      try
+      {
+        while (AI_UNLIKELY(!m_free_indices.pop(index)))
+          increase_size();      // Converts m_rwlock from read to write lock (which might throw) and back.
+      }
+      catch (std::exception const&)
+      {
+        m_rwlock.rdunlock();
+        m_rwlock.rd2wryield();  // Wait until the other thread is done increasing the size.
+        continue;
+      }
+      m_storage[index] = value;
+      m_rwlock.rdunlock();
+      break;
     }
-    m_storage[index] = value;
-    m_rwlock.rdunlock();
     return index;
   }
 
