@@ -57,6 +57,8 @@
 #else // CWDEBUG
 #define DEBUG_RWSPINLOCK 0
 #undef DEBUG_RWSPINLOCK_THREADPERMUTER
+#define RWSLDout(a, b) do { } while(0)
+#define RWSLDoutEntering(a, b) do { } while(0)
 #endif // CWDEBUG
 
 #ifndef DEBUG_RWSPINLOCK_THREADPERMUTER
@@ -472,40 +474,42 @@ private:
 
       // Next we're going to wait until m_state becomes positive again.
       bool read_locked = false;
-      RWSLDout(dc::notice, "Entering m_readers_cv.wait()");
-      std::unique_lock<mutex_t> lk(m_readers_cv_mutex);
-      TPY;
-      m_readers_cv.wait(lk, [this, &read_locked](){
-        RWSLDout(dc::notice, "Inside m_readers_cv.wait()'s lambda; m_readers_cv_mutex is locked.");
-        int64_t state = 0; // If m_state is in the "unlocked" state (0), then replace it with one_rdlock (1).
-        read_locked = m_state.compare_exchange_weak(state, one_rdlock, std::memory_order::relaxed, std::memory_order::relaxed);
-        RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(0, 1, ...) = " << read_locked);
+      {
+        std::unique_lock<mutex_t> lk(m_readers_cv_mutex);
         TPY;
-        // If this returned true, then m_state was 0 and is now 1,
-        // which means we successfully obtained a read lock.
-        //
-        // If it returned false and at the moment V is negative then we are still write locked
-        // and it is safe to enter wait() again because we have the lock on m_readers_cv_mutex
-        // and therefore the condition variable is guaranteed to be notified again.
+        RWSLDout(dc::notice, "Calling m_readers_cv.wait(lk, lambda)");
+        m_readers_cv.wait(lk, [this, &read_locked](){
+          RWSLDout(dc::notice, "Inside m_readers_cv.wait()'s lambda; m_readers_cv_mutex is locked.");
+          int64_t state = 0; // If m_state is in the "unlocked" state (0), then replace it with one_rdlock (1).
+          read_locked = m_state.compare_exchange_weak(state, one_rdlock, std::memory_order::relaxed, std::memory_order::relaxed);
+          RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(0, 1, ...) = " << read_locked << "... ");
+          TPY;
+          // If this returned true, then m_state was 0 and is now 1,
+          // which means we successfully obtained a read lock.
+          //
+          // If it returned false and at the moment V is negative then we are still write locked
+          // and it is safe to enter wait() again because we have the lock on m_readers_cv_mutex
+          // and therefore the condition variable is guaranteed to be notified again.
 #if DEBUG_RWSPINLOCK
-        if (read_locked)
-          RWSLDout(dc::finish, "; transition: " << get_counters(0) << " --> " << get_counters(one_rdlock));
-        else
-          RWSLDout(dc::finish, "; state was " << get_counters(state));
+          if (read_locked)
+            RWSLDout(dc::finish, "transition: " << get_counters(0) << " --> " << get_counters(one_rdlock));
+          else
+            RWSLDout(dc::finish, "state was " << get_counters(state));
 #endif
-        // In other words: since the following returns false when there are writers present,
-        // we must have m_readers_cv_mutex locked whenever we do a transition that removes
-        // a writer - and do a notify_all after that.
-        RWSLDout(dc::notice|flush_cf, "Returning " << std::boolalpha << (read_locked || !writer_present(state)) << "; unlocking m_readers_cv_mutex...");
-        bool exit_wait = read_locked || !writer_present(state);
+          // In other words: since the following returns false when there are writers present,
+          // we must have m_readers_cv_mutex locked whenever we do a transition that removes
+          // a writer - and do a notify_all after that.
+          RWSLDout(dc::notice|flush_cf, "Returning " << std::boolalpha << (read_locked || !writer_present(state)) << "; unlocking m_readers_cv_mutex...");
+          bool exit_wait = read_locked || !writer_present(state);
 #ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
-        if (!exit_wait)
-          TPP;  // For the unlock of m_readers_cv_mutex.
+          if (!exit_wait)
+            TPP;  // For the unlock of m_readers_cv_mutex.
 #endif
-        return exit_wait;
-      });
-      RWSLDout(dc::notice, "Left m_readers_cv.wait() with read_locked = " << read_locked << "; m_readers_cv_mutex is locked. Unlocking it...");
-      TPY; // Because we leave the scope of the std::unique_lock.
+          return exit_wait;
+        });
+        RWSLDout(dc::notice, "Left m_readers_cv.wait() with read_locked = " << read_locked << "; m_readers_cv_mutex is locked. Unlocking it...");
+      }
+      TPY; // Because we left the scope of the std::unique_lock.
       // If read_locked was set, then we effectively added one_rdlock to m_state and we're done.
       if (read_locked)
         break;
@@ -565,41 +569,43 @@ private:
 
       // Note that m_writers_cv is notified each time W or C is decremented.
       bool write_locked = false;
-      RWSLDout(dc::notice, "Entering m_writers_cv.wait()");
-      std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
-      TPY;
-      m_writers_cv.wait(lk, [this, state, &write_locked]() mutable {
-        RWSLDout(dc::notice, "Inside m_writers_cv.wait()'s lambda; m_writers_cv_mutex is locked.");
-        state &= V_mask;        // Demand C = W = R = 0.
-        write_locked = m_state.compare_exchange_weak(state, state + finalize_wrlock, std::memory_order::relaxed, std::memory_order::relaxed);
-        RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(" << get_counters(state) << ", " << get_counters(state + finalize_wrlock) << ", ...) = " << write_locked);
+      {
+        std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
         TPY;
-        // If this returned true, then m_state was state (C == W == R == 0) and is now state + finalize_wrlock,
-        // which means we successfully obtained a write lock.
-        //
-        // If it returned false and at the moment W or C are larger than zero, then it is
-        // safe to enter wait() again because we have the lock on m_writers_cv_mutex
-        // and therefore it is guaranteed that the condition variable will be notified again when
-        // either changes towards zero.
+        RWSLDout(dc::notice, "Calling m_writers_cv.wait(lk, lambda)");
+        m_writers_cv.wait(lk, [this, state, &write_locked]() mutable {
+          RWSLDout(dc::notice, "Inside m_writers_cv.wait()'s lambda; m_writers_cv_mutex is locked.");
+          state &= V_mask;        // Demand C = W = R = 0.
+          write_locked = m_state.compare_exchange_weak(state, state + finalize_wrlock, std::memory_order::relaxed, std::memory_order::relaxed);
+          RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(" << get_counters(state) << ", " << get_counters(state + finalize_wrlock) << ", ...) = " << write_locked << "... ");
+          TPY;
+          // If this returned true, then m_state was state (C == W == R == 0) and is now state + finalize_wrlock,
+          // which means we successfully obtained a write lock.
+          //
+          // If it returned false and at the moment W or C are larger than zero, then it is
+          // safe to enter wait() again because we have the lock on m_writers_cv_mutex
+          // and therefore it is guaranteed that the condition variable will be notified again when
+          // either changes towards zero.
 #if DEBUG_RWSPINLOCK
-        if (write_locked)
-          RWSLDout(dc::finish, "; transition: " << get_counters(state) << " --> " << get_counters(state + finalize_wrlock));
-        else
-          RWSLDout(dc::finish, "; state was " << get_counters(state));
+          if (write_locked)
+            RWSLDout(dc::finish, "transition: " << get_counters(state) << " --> " << get_counters(state + finalize_wrlock));
+          else
+            RWSLDout(dc::finish, "state was " << get_counters(state));
 #endif
-        // In other words: since the following returns false when there were converting/actual writers present,
-        // we must have m_writers_cv_mutex locked whenever we do a transition that removes a converting/actual
-        // writer - and do a notify_one after that.
-        RWSLDout(dc::notice|flush_cf, "Returning " << std::boolalpha << (write_locked || !converting_or_actual_writer_present(state)) << "; unlocking m_writers_cv_mutex...");
-        bool exit_wait = write_locked || !converting_or_actual_writer_present(state);
+          // In other words: since the following returns false when there were converting/actual writers present,
+          // we must have m_writers_cv_mutex locked whenever we do a transition that removes a converting/actual
+          // writer - and do a notify_one after that.
+          RWSLDout(dc::notice|flush_cf, "Returning " << std::boolalpha << (write_locked || !converting_or_actual_writer_present(state)) << "; unlocking m_writers_cv_mutex...");
+          bool exit_wait = write_locked || !converting_or_actual_writer_present(state);
 #ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
-        if (!exit_wait)
-          TPP;    // For the unlock of m_writers_cv_mutex.
+          if (!exit_wait)
+            TPP;    // For the unlock of m_writers_cv_mutex.
 #endif
-        return exit_wait;
-      });
-      RWSLDout(dc::notice, "Left m_writers_cv.wait() with write_locked = " << write_locked << "; m_writers_cv_mutex is locked. Unlocking it...");
-      TPY; // Because we leave the scope of the std::unique_lock.
+          return exit_wait;
+        });
+        RWSLDout(dc::notice, "Left m_writers_cv.wait() with write_locked = " << write_locked << "; m_writers_cv_mutex is locked. Unlocking it...");
+      }
+      TPY; // Because we left the scope of the std::unique_lock.
       // If write_locked was set, then we effectively added one_wrlock to m_state and we're done.
       if (write_locked)
         break;
@@ -649,13 +655,13 @@ private:
     }
     RWSLDout(dc::finish, "done (state = " << get_counters(state) << ")");
 
-    RWSLDout(dc::notice, "Entering m_writers_cv.wait()");
     {
       std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
       TPY;
       // Finally, wait until a possible actual writer released their write-lock.
       // Note that m_writers_cv is notified each time W or C is decremented.
       // C == 1 (this thread) and will not be decremented to zero; so we can use the same condition variable.
+      RWSLDout(dc::notice, "Calling m_writers_cv.wait(lk, lambda)");
       m_writers_cv.wait(lk, [this, state]() mutable {
         RWSLDout(dc::notice, "Inside m_writers_cv.wait()'s lambda; m_writers_cv_mutex is locked.");
         bool write_locked;
@@ -663,12 +669,12 @@ private:
         {
           state &= ~W_mask;       // Demand W = 0.
           write_locked = m_state.compare_exchange_weak(state, state + successful_rd2wrlock, std::memory_order::relaxed, std::memory_order::relaxed);
-          RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(" << get_counters(state) << ", " << get_counters(state + successful_rd2wrlock) << ", ...) = " << write_locked);
+          RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(" << get_counters(state) << ", " << get_counters(state + successful_rd2wrlock) << ", ...) = " << write_locked << "... ");
 #if DEBUG_RWSPINLOCK
           if (write_locked)
-            RWSLDout(dc::finish, "; transition: " << get_counters(state) << " --> " << get_counters(state + successful_rd2wrlock));
+            RWSLDout(dc::finish, "transition: " << get_counters(state) << " --> " << get_counters(state + successful_rd2wrlock));
           else
-            RWSLDout(dc::finish, "; state was " << get_counters(state));
+            RWSLDout(dc::finish, "state was " << get_counters(state));
 #endif
           TPY;
         }
@@ -688,8 +694,8 @@ private:
         return exit_wait;
       });
       RWSLDout(dc::notice, "Left m_writers_cv.wait(); m_writers_cv_mutex is locked. Unlocking it...");
-      TPY; // Because we leave the scope of the std::unique_lock.
     }
+    TPY; // Because we left the scope of the std::unique_lock.
     RWSLDout(dc::notice, "Leaving rd2wrlock()");
   }
 
@@ -700,19 +706,21 @@ private:
     std::this_thread::yield();
 #endif
     // Wait until C became zero again.
-    std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
-    TPY;
-    m_writers_cv.wait(lk, [this](){
-      bool leave_rd2wryield = !converting_writer_present(m_state.load(std::memory_order::relaxed));
+    {
+      std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
       TPY;
-      bool exit_wait = leave_rd2wryield;
+      m_writers_cv.wait(lk, [this](){
+        bool leave_rd2wryield = !converting_writer_present(m_state.load(std::memory_order::relaxed));
+        TPY;
+        bool exit_wait = leave_rd2wryield;
 #ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
-      if (!exit_wait)
-        TPP;    // For the unlock of m_writers_cv_mutex.
+        if (!exit_wait)
+          TPP;    // For the unlock of m_writers_cv_mutex.
 #endif
-      return exit_wait;
-    });
-    TPY; // Because we leave the scope of the std::unique_lock.
+        return exit_wait;
+      });
+    }
+    TPY; // Because we left the scope of the std::unique_lock.
   }
 
   void wrunlock()
