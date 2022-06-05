@@ -368,7 +368,7 @@ class AIReadWriteSpinLock
       ASSERT(false);
       return 0;
     }
-    // If the result of `writer_present` might to change from true to false, we should wake up possible threads that are waiting for that.
+    // If the result of `writer_present` might change from true to false, we should wake up possible threads that are waiting for that.
     else if constexpr (removes_writer(increment))
     {
       bool writer_present_became_false;
@@ -406,6 +406,7 @@ class AIReadWriteSpinLock
         RWSLDout(dc::notice, "Not calling notify_all() because writer_present() didn't change.");
       return previous_state;
     }
+    // If the result of `converting_or_actual_writer_present` might change from true to false, we should wake up possible threads that are waiting for that.
     else if constexpr (removes_converting_or_actual_writer(increment))
     {
       int64_t previous_state;
