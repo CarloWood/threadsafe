@@ -25,7 +25,9 @@
  * along with threadsafe.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef DEBUG_STATIC_ASSERTS
 #pragma once
+#endif
 
 #ifdef CWDEBUG
 // Set to 1 to enable very extentive debug output with regard to this class; as well as enable static_asserts at the end.
@@ -42,18 +44,23 @@
 #include <exception>
 
 #ifdef CWDEBUG
+#ifdef DEBUG_STATIC_ASSERTS
+#define consteval constexpr
+#undef DEBUG_RWSPINLOCK
+#define DEBUG_RWSPINLOCK 1
+#endif // DEBUG_STATIC_ASSERTS
 #if DEBUG_RWSPINLOCK
 #include <iomanip>
 #include <array>
 #define RWSLDout(a, b) Dout(a, b)
 #define RWSLDoutEntering(a, b) DoutEntering(a, b)
-#else
+#else // DEBUG_RWSPINLOCK
 #define RWSLDout(a, b) do { } while(0)
 #define RWSLDoutEntering(a, b) do { } while(0)
-#endif
+#endif // DEBUG_RWSPINLOCK
 #ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
 #include "ThreadPermuter.h"
-#endif
+#endif // DEBUG_RWSPINLOCK_THREADPERMUTER
 #else // CWDEBUG
 #define DEBUG_RWSPINLOCK 0
 #undef DEBUG_RWSPINLOCK_THREADPERMUTER
@@ -68,7 +75,7 @@
 #define TPY
 #define TPB
 #define TPP
-#endif
+#endif // DEBUG_RWSPINLOCK_THREADPERMUTER
 
 class AIReadWriteSpinLock
 {
@@ -89,6 +96,8 @@ class AIReadWriteSpinLock
   static constexpr int64_t v = c << shift;
 
   // Used in certain test.
+  static constexpr int64_t sign_bit_r = r << (shift - 1);
+  static constexpr int64_t sign_bit_v = v << (shift - 1);
   static constexpr int64_t sign_bit_c = c << (shift - 1);
   static constexpr int64_t sign_bit_w = w << (shift - 1);
 
@@ -100,7 +109,7 @@ class AIReadWriteSpinLock
   static constexpr int64_t V_mask = C_mask << shift;
 
   // Possible transitions.
-  static constexpr int64_t one_rdlock           =      1;
+  static constexpr int64_t one_rdlock           =      r;
   static constexpr int64_t one_wrlock           = -v + w;     // A negative value, significantly less than one_rdlock * max_number_of_threads.
   static constexpr int64_t one_rd2wrlock        = -v + c;     // A negative value, significantly less than w * max_number_of_threads.
   static constexpr int64_t one_waiting_writer   = -v;         // A negative value, significantly less than c * max_number_of_threads.
@@ -198,10 +207,10 @@ class AIReadWriteSpinLock
   // That includes the C count, because threads that try to convert their read-lock into a write-lock have
   // a higher priority (after all, we can't get a write-lock while they have their read-lock, so there is no other way).
   //
-  // Returns true when either C or W is larger than zero.
+  // Returns true if either C or W is larger than zero.
   [[gnu::always_inline]] static constexpr bool converting_or_actual_writer_present(int64_t state)
   {
-    // Note that C and W can't be negative.
+    // Note that C and W (and R) can't be negative.
     return (state & CW_mask) != 0;
   }
 
@@ -242,67 +251,56 @@ class AIReadWriteSpinLock
     return (state & W_mask) != 0;
   }
 
-  // This test is used in do_transition and tests if adding `increment` to m_state can cause a (waiting) writer to be removed.
-  // Returns true if C < 0 || W < 0.
-  [[gnu::always_inline]] static constexpr bool removes_writer(int64_t increment)
+  static consteval std::array<int, 4> decode_increment(int64_t increment)
   {
-    return ((increment & sign_bit_c) && (increment & (C_mask | c / 2)) != (C_mask | c / 2)) ||
-           ((increment & sign_bit_w) && (increment & (W_mask | w / 2)) != (W_mask | w / 2));
+    std::array<int, 4> i;
+    i[3] = (increment & R_mask) - ((increment & sign_bit_r) << 1);
+    if (i[3] < 0)
+      increment += w;
+    i[2] = ((increment & W_mask) - ((increment & sign_bit_w) << 1)) >> shift;
+    if (i[2] < 0)
+      increment += c;
+    i[1] = ((increment & C_mask) - ((increment & sign_bit_c) << 1)) >> (2 * shift);
+    if (i[1] < 0)
+      increment += v;
+    i[0] = ((increment & V_mask) - ((increment & sign_bit_v) << 1)) >> (3 * shift);
+    return i;
   }
 
-  // This test is used in do_transition and tests if adding `increment` to m_state can cause a converting/actual writer to be removed.
-  // "Real writers" here means literally that their removal might change the value of converting_or_actual_writer_present from true to false.
-  [[gnu::always_inline]] static constexpr bool removes_converting_or_actual_writer(int64_t increment)
+  // This test is used in do_transition and tests if adding `increment` to m_state can cause a (waiting) writer to be removed.
+  // Returns true if V > 0 || C < 0 || W < 0.
+  static consteval bool removes_writer(int64_t increment)
   {
-    // This sign_bit must always be set, because either C is negative,
-    // or C is "zero" but W is negative, borrowing 1 from C making it
-    // appear to be negative.
-    if ((increment & sign_bit_c) == 0)
-      return false;
+    std::array<int, 4> i = decode_increment(increment);
+    return i[0] > 0 || i[1] < 0 || i[2] < 0;
+  }
 
-    // At this point sign_bit_c is set, which means that:
-    // 1. C < 0, OR
-    // 2. C == 0 and W < 0, OR
-    // 3. C == 0 and W == 0 and R < 0.
+  // This test is used in do_transition and tests if adding `increment` to m_state can cause the number of converting/actual writers to become zero.
+  // What this means is that this transition might change the value of converting_or_actual_writer_present from true to false.
+  // Returns true if (C < 0 || W < 0) && !(C > 0 || W > 0).
+  static consteval bool removes_converting_or_actual_writer(int64_t increment)
+  {
+    std::array<int, 4> i = decode_increment(increment);
+    return (i[1] < 0 || i[2] < 0) && !(i[1] > 0 || i[2] > 0);
+  }
 
-    // Detect the case C < 0 (point 1), W == 0, R >= 0 (no borrow from W).
-    // That C is negative is implied by the first test, if W == 0.
-    // Using w / 2 instead of sign_bit_r, because this is not about R but
-    // about whatever counter is below W that might have borrowed 1 from W.
-    if ((increment & (W_mask | w / 2)) == 0)
-      return true;
+  // Returns true if C < 0.
+  static consteval bool removes_converting_writer(int64_t increment)
+  {
+    std::array<int, 4> i = decode_increment(increment);
+    return i[1] < 0;
+  }
 
-    // At this point we have either
-    // 1a. C < 0 and W != 0, OR
-    // 1b. C < 0, W == 0 and R < 0, OR
-    // 2. C == 0 and W < 0, OR
-    // 3. C == 0 and W == 0 and R < 0.
-
-    // Detect the case where W > 0 (point 1a). If the sign bit is not
-    // set then that rules out 1b and 3 because if R < 0 it would borrow
-    // from W (that is zero in those cases) and cause the bit be set.
-    // It also rules out 2 that has a negative W. Therefore this then
-    // must be point 1a with a non-negative W, hence a positive W and
-    // we can return false.
-    if ((increment & sign_bit_w) == 0)
-      return false;
-
-    // At this point we have either
-    // 1a. C < 0 and W < 0, OR
-    // 1b. C < 0, W == 0 (and R < 0), OR
-    // 1c. C == 0 and W < 0, OR
-    // 2. C == 0 and W < 0, OR
-    // 3. C == 0 and W == 0 (and R < 0).
-
-    // In all but the last case we should return true.
-    // Hence return false for case 3. Again, using w / 2 instead of sign_bit_r,
-    // because this is not about R but about whatever counter is below W that
-    // might have borrowed 1 from W.
-    return (increment & (CW_mask | w / 2)) != (CW_mask | w / 2);
+  // Returns true if W < 0.
+  static consteval bool removes_actual_writer(int64_t increment)
+  {
+    std::array<int, 4> i = decode_increment(increment);
+    return i[2] < 0;
   }
 
 #if DEBUG_RWSPINLOCK
-  static constexpr int64_t make_state(std::array<int64_t, 4> const& s)
+  // Works for state and increment.
+  static consteval int64_t make_state(std::array<int, 4> const& s)
   {
     std::array<int64_t, 4> const b = { v, c, w, r };
     int64_t res = 0;
@@ -315,113 +313,360 @@ class AIReadWriteSpinLock
     return res;
   }
 
-  static constexpr bool test_removes_converting_or_actual_writer()
+  static consteval bool test_removes_converting_or_actual_writer()
   {
+    // Test that removes_converting_or_actual_writer does what its comment says: return true iff (c < 0 || w < 0) && !(c > 0 || w > 0).
     for (int v = -1; v <= 1; ++v)
       for (int c = -2; c <= 2; ++c)
         for (int w = -2; w <= 2; ++w)
           for (int r = -2; r <= 2; ++r)
           {
             // All transitions do c and v, or w and v in pairs.
-            std::array<int64_t, 4> s = { v - c - w, c, w, r };
+            std::array<int, 4> i = { v - c - w, c, w, r };
+            int64_t increment = make_state(i);
             bool expected = (c < 0 || w < 0) && !(c > 0 || w > 0);
-            int64_t increment = make_state(s);
+            // Test removes_converting_or_actual_writer.
             if (removes_converting_or_actual_writer(increment) != expected)
+            {
+#ifdef DEBUG_STATIC_ASSERTS
+              std::cout << "Error: " << std::dec << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; removes_converting_or_actual_writer(" <<
+                std::hex << std::setfill('0') << std::setw(16) << increment << ") = " << std::boolalpha << !expected << "; expected: " << std::boolalpha << expected << std::endl;
+#endif
               return false;
+            }
+          }
+    // In the broader picture, any transition (increment) that might cause converting_or_actual_writer_present
+    // to become false must satisfy removes_converting_or_actual_writer(increment).
+    for (int pure_waiting = 0; pure_waiting <= 2; ++pure_waiting)
+      for (int converting = 0; converting <= 3; ++converting)
+        for (int writing = 0; writing <= 2; ++writing)
+          for (int reading = 0; reading <= 2; ++reading)
+          {
+            std::array<int, 4> s = { -pure_waiting - converting - writing, converting, writing, reading };
+#ifdef DEBUG_STATIC_ASSERTS
+            assert(s[0] <= -(s[1] + s[2]));                             // A state always must have V <= -(C + W).
+#endif
+            int64_t state = make_state(s);
+            // Counters may never become negative (or v positive).
+            for (int v = -1; v <= 1; ++v)
+              for (int c = std::max(-2, -converting); c <= 2; ++c)      // c + converting >= 0 --> c >= -converting.
+                for (int w = std::max(-2, -writing); w <= 2; ++w)
+                  for (int r = std::max(-2, -reading); r <= 2; ++r)
+                  {
+                    std::array<int, 4> i = { v - c - w, c, w, r };
+                    if (!(s[0] + i[0] <= -(s[1] + i[1] + s[2] + i[2]))) // Also the resulting state must always have V <= -(C + W).
+                      continue;
+                    int64_t increment = make_state(i);
+                    bool converting_or_actual_writer_present_becomes_false = converting_or_actual_writer_present(state) && !converting_or_actual_writer_present(state + increment);
+                    if (converting_or_actual_writer_present_becomes_false && !removes_converting_or_actual_writer(increment))
+                    {
+#ifdef DEBUG_STATIC_ASSERTS
+                      std::cout << "Error: " << std::dec << "pure_waiting = " << pure_waiting << ", converting = " <<
+                        converting << ", writing = " << writing << ", reading = " << reading << "; state = " <<
+                        std::hex << std::setfill('0') << std::setw(16) << state << std::dec << std::endl;
+                      std::cout << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; increment = " <<
+                        std::hex << std::setfill('0') << std::setw(16) << increment << std::dec << std::endl;
+                      std::cout << "converting_or_actual_writer_present_becomes_false = " << std::boolalpha << converting_or_actual_writer_present_becomes_false <<
+                        "; state + increment = " << std::hex << std::setfill('0') << std::setw(16) << (state + increment) << std::dec << std::endl;
+#endif
+                      return false;     // Logic error.
+                    }
+
+                  }
           }
     return true;  // Success.
   }
 
-  static constexpr bool test_removes_writer()
+  static consteval bool test_removes_converting_writer()
   {
+    // Test that removes_converting_writer does what its comment says: return true iff c < 0.
     for (int v = -1; v <= 1; ++v)
       for (int c = -2; c <= 2; ++c)
         for (int w = -2; w <= 2; ++w)
           for (int r = -2; r <= 2; ++r)
           {
             // All transitions do c and v, or w and v in pairs.
-            std::array<int64_t, 4> s = { v - c - w, c, w, r };
-            bool expected = c < 0 || w < 0;
-            int64_t increment = make_state(s);
-            if (removes_writer(increment) != expected)
+            std::array<int, 4> i = { v - c - w, c, w, r };
+            int64_t increment = make_state(i);
+            bool expected = c < 0;
+            // Test removes_converting_writer.
+            if (removes_converting_writer(increment) != expected)
             {
-              //std::cout << "Error: " << std::dec << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; " <<
-              //  std::hex << std::setfill('0') << std::setw(16) << increment << "; expected: " << std::boolalpha << expected << std::endl;
+#ifdef DEBUG_STATIC_ASSERTS
+              std::cout << "Error: " << std::dec << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; removes_converting_writer(" <<
+                std::hex << std::setfill('0') << std::setw(16) << increment << ") = " << std::boolalpha << !expected << "; expected: " << std::boolalpha << expected << std::endl;
+#endif
               return false;
             }
+          }
+    // In the broader picture, any transition (increment) that might cause converting_writer_present
+    // to become false must satisfy removes_converting_writer(increment).
+    for (int pure_waiting = 0; pure_waiting <= 2; ++pure_waiting)
+      for (int converting = 0; converting <= 3; ++converting)
+        for (int writing = 0; writing <= 2; ++writing)
+          for (int reading = 0; reading <= 2; ++reading)
+          {
+            std::array<int, 4> s = { -pure_waiting - converting - writing, converting, writing, reading };
+#ifdef DEBUG_STATIC_ASSERTS
+            assert(s[0] <= -(s[1] + s[2]));                             // A state always must have V <= -(C + W).
+#endif
+            int64_t state = make_state(s);
+            // Counters may never become negative (or v positive).
+            for (int v = -1; v <= 1; ++v)
+              for (int c = std::max(-2, -converting); c <= 2; ++c)      // c + converting >= 0 --> c >= -converting.
+                for (int w = std::max(-2, -writing); w <= 2; ++w)
+                  for (int r = std::max(-2, -reading); r <= 2; ++r)
+                  {
+                    std::array<int, 4> i = { v - c - w, c, w, r };
+                    if (!(s[0] + i[0] <= -(s[1] + i[1] + s[2] + i[2]))) // Also the resulting state must always have V <= -(C + W).
+                      continue;
+                    int64_t increment = make_state(i);
+                    bool converting_writer_present_becomes_false = converting_writer_present(state) && !converting_writer_present(state + increment);
+                    if (converting_writer_present_becomes_false && !removes_converting_writer(increment))
+                    {
+#ifdef DEBUG_STATIC_ASSERTS
+                      std::cout << "Error: " << std::dec << "pure_waiting = " << pure_waiting << ", converting = " <<
+                        converting << ", writing = " << writing << ", reading = " << reading << "; state = " <<
+                        std::hex << std::setfill('0') << std::setw(16) << state << std::dec << std::endl;
+                      std::cout << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; increment = " <<
+                        std::hex << std::setfill('0') << std::setw(16) << increment << std::dec << std::endl;
+                      std::cout << "converting_writer_present_becomes_false = " << std::boolalpha << converting_writer_present_becomes_false <<
+                        "; state + increment = " << std::hex << std::setfill('0') << std::setw(16) << (state + increment) << std::dec << std::endl;
+#endif
+                      return false;     // Logic error.
+                    }
+
+                  }
+          }
+    return true;  // Success.
+  }
+
+  static consteval bool test_removes_actual_writer()
+  {
+    // Test that removes_actual_writer does what its comment says: return true iff w < 0.
+    for (int v = -1; v <= 1; ++v)
+      for (int c = -2; c <= 2; ++c)
+        for (int w = -2; w <= 2; ++w)
+          for (int r = -2; r <= 2; ++r)
+          {
+            // All transitions do c and v, or w and v in pairs.
+            std::array<int, 4> i = { v - c - w, c, w, r };
+            int64_t increment = make_state(i);
+            bool expected = w < 0;
+            // Test removes_actual_writer.
+            if (removes_actual_writer(increment) != expected)
+            {
+#ifdef DEBUG_STATIC_ASSERTS
+              std::cout << "Error: " << std::dec << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; removes_actual_writer(" <<
+                std::hex << std::setfill('0') << std::setw(16) << increment << ") = " << std::boolalpha << !expected << "; expected: " << std::boolalpha << expected << std::endl;
+#endif
+              return false;
+            }
+          }
+    // In the broader picture, any transition (increment) that might cause actual_writer_present
+    // to become false must satisfy removes_actual_writer(increment).
+    for (int pure_waiting = 0; pure_waiting <= 2; ++pure_waiting)
+      for (int converting = 0; converting <= 3; ++converting)
+        for (int writing = 0; writing <= 2; ++writing)
+          for (int reading = 0; reading <= 2; ++reading)
+          {
+            std::array<int, 4> s = { -pure_waiting - converting - writing, converting, writing, reading };
+#ifdef DEBUG_STATIC_ASSERTS
+            assert(s[0] <= -(s[1] + s[2]));                             // A state always must have V <= -(C + W).
+#endif
+            int64_t state = make_state(s);
+            // Counters may never become negative (or v positive).
+            for (int v = -1; v <= 1; ++v)
+              for (int c = std::max(-2, -converting); c <= 2; ++c)      // c + converting >= 0 --> c >= -converting.
+                for (int w = std::max(-2, -writing); w <= 2; ++w)
+                  for (int r = std::max(-2, -reading); r <= 2; ++r)
+                  {
+                    std::array<int, 4> i = { v - c - w, c, w, r };
+                    if (!(s[0] + i[0] <= -(s[1] + i[1] + s[2] + i[2]))) // Also the resulting state must always have V <= -(C + W).
+                      continue;
+                    int64_t increment = make_state(i);
+                    bool converting_writer_present_becomes_false = converting_writer_present(state) && !converting_writer_present(state + increment);
+                    if (converting_writer_present_becomes_false && !removes_converting_writer(increment))
+                    {
+#ifdef DEBUG_STATIC_ASSERTS
+                      std::cout << "Error: " << std::dec << "pure_waiting = " << pure_waiting << ", converting = " <<
+                        converting << ", writing = " << writing << ", reading = " << reading << "; state = " <<
+                        std::hex << std::setfill('0') << std::setw(16) << state << std::dec << std::endl;
+                      std::cout << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; increment = " <<
+                        std::hex << std::setfill('0') << std::setw(16) << increment << std::dec << std::endl;
+                      std::cout << "converting_writer_present_becomes_false = " << std::boolalpha << converting_writer_present_becomes_false <<
+                        "; state + increment = " << std::hex << std::setfill('0') << std::setw(16) << (state + increment) << std::dec << std::endl;
+#endif
+                      return false;     // Logic error.
+                    }
+
+                  }
+          }
+    return true;  // Success.
+  }
+
+  static consteval bool test_removes_writer()
+  {
+    // Test that removes_writer does what its comment says: return true iff c < 0 || w < 0.
+    for (int v = -1; v <= 1; ++v)
+      for (int c = -2; c <= 2; ++c)
+        for (int w = -2; w <= 2; ++w)
+          for (int r = -2; r <= 2; ++r)
+          {
+            // All transitions do c and v, or w and v in pairs.
+            std::array<int, 4> i = { v - c - w, c, w, r };
+            int64_t increment = make_state(i);
+            // Test decode_increment.
+            std::array<int, 4> read_back = decode_increment(increment);
+            if (read_back != i)
+            {
+#ifdef DEBUG_STATIC_ASSERTS
+              std::cout << "Error: decode_increment(" << std::hex << std::setfill('0') << std::setw(16) << increment << std::dec << ") = ";
+              for (int n : read_back)
+                std::cout << n << ' ';
+              std::cout << std::endl;
+#endif
+              return false;
+            }
+            bool expected = i[0] > 0 || c < 0 || w < 0;
+            // Test removes_writer.
+            if (removes_writer(increment) != expected)
+            {
+#ifdef DEBUG_STATIC_ASSERTS
+              std::cout << "Error: " << std::dec << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; removes_writer(" <<
+                std::hex << std::setfill('0') << std::setw(16) << increment << ") = " << std::boolalpha << !expected << "; expected: " << std::boolalpha << expected << std::endl;
+#endif
+              return false;
+            }
+          }
+    // In the broader picture, any transition (increment) that might cause writer_present, converting_or_actual_writer_present,
+    // actual_writer_present or converting_writer_present to become false must satisfy removes_writer(increment).
+    for (int pure_waiting = 0; pure_waiting <= 2; ++pure_waiting)
+      for (int converting = 0; converting <= 3; ++converting)
+        for (int writing = 0; writing <= 2; ++writing)
+          for (int reading = 0; reading <= 2; ++reading)
+          {
+            std::array<int, 4> s = { -pure_waiting - converting - writing, converting, writing, reading };
+#ifdef DEBUG_STATIC_ASSERTS
+            assert(s[0] <= -(s[1] + s[2]));                             // A state always must have V <= -(C + W).
+#endif
+            int64_t state = make_state(s);
+            // Counters may never become negative (or v positive).
+            for (int v = -1; v <= 1; ++v)
+              for (int c = std::max(-2, -converting); c <= 2; ++c)      // c + converting >= 0 --> c >= -converting.
+                for (int w = std::max(-2, -writing); w <= 2; ++w)
+                  for (int r = std::max(-2, -reading); r <= 2; ++r)
+                  {
+                    std::array<int, 4> i = { v - c - w, c, w, r };
+                    if (!(s[0] + i[0] <= -(s[1] + i[1] + s[2] + i[2]))) // Also the resulting state must always have V <= -(C + W).
+                      continue;
+                    int64_t increment = make_state(i);
+                    bool writer_present_becomes_false = writer_present(state) && !writer_present(state + increment);
+                    bool converting_or_actual_writer_present_becomes_false = converting_or_actual_writer_present(state) && !converting_or_actual_writer_present(state + increment);
+                    bool actual_writer_present_becomes_false = actual_writer_present(state) && !actual_writer_present(state + increment);
+                    bool converting_writer_present_becomes_false = converting_writer_present(state) && !converting_writer_present(state + increment);
+                    if ((writer_present_becomes_false ||
+                         converting_or_actual_writer_present_becomes_false ||
+                         actual_writer_present_becomes_false ||
+                         converting_writer_present_becomes_false) && !removes_writer(increment))
+                    {
+#ifdef DEBUG_STATIC_ASSERTS
+                      std::cout << "Error: " << std::dec << "pure_waiting = " << pure_waiting << ", converting = " <<
+                        converting << ", writing = " << writing << ", reading = " << reading << "; state = " <<
+                        std::hex << std::setfill('0') << std::setw(16) << state << std::dec << std::endl;
+                      std::cout << "v = " << v << ", c = " << c << ", w = " << w << ", r = " << r << "; increment = " <<
+                        std::hex << std::setfill('0') << std::setw(16) << increment << std::dec << std::endl;
+                      std::cout << "writer_present_becomes_false = " << std::boolalpha << writer_present_becomes_false <<
+                        "; converting_or_actual_writer_present_becomes_false = " << std::boolalpha << converting_or_actual_writer_present_becomes_false <<
+                        "; actual_writer_present_becomes_false = " << std::boolalpha << actual_writer_present_becomes_false <<
+                        "; converting_writer_present_becomes_false = " << std::boolalpha << converting_writer_present_becomes_false <<
+                        "; state + increment = " << std::hex << std::setfill('0') << std::setw(16) << (state + increment) << std::dec << std::endl;
+#endif
+                      return false;     // Logic error.
+                    }
+                  }
           }
     return true;  // Success.
   }
 
   // The sanity of all of the above is tested in AIReadWriteSpinLock_static_assert, see at the bottom of this file.
   friend struct AIReadWriteSpinLock_static_assert;
-#endif
+#endif // DEBUG_RWSPINLOCK
 
   template<int64_t increment>
   [[gnu::always_inline]] int64_t do_transition()
   {
     RWSLDoutEntering(dc::notice|continued_cf, "do_transition<" << get_counters_as_increment(increment) << ">() ");
-    // This is a no-op.
-    if constexpr (increment == 0)
-    {
-      // The return value should not be used; but since we can't check that, just don't allow the function to be called at all (which clearly makes no sense).
-      ASSERT(false);
-      return 0;
-    }
+    // `increment == 0` is a no-op. The return value in that case should not be used; but since we can't check that,
+    // just don't allow the function to be called at all (since that doesn't make sense anyway).
+    static_assert(increment != 0, "Don't call do_transition<0>()");
     // If the result of `writer_present` might change from true to false, we should wake up possible threads that are waiting for that.
-    else if constexpr (removes_writer(increment))
+    if constexpr (removes_writer(increment))
     {
-      bool writer_present_became_false;
+#if CW_DEBUG
+      bool m_writers_cv_mutex_was_locked = false;
+#endif
       int64_t previous_state;
       {
         std::lock_guard<mutex_t> lk(m_readers_cv_mutex);
         RWSLDout(dc::notice, "m_readers_cv_mutex is locked.");
-        if constexpr (!removes_converting_or_actual_writer(increment))
+        if constexpr (removes_converting_or_actual_writer(increment) ||
+                      removes_converting_writer(increment) ||
+                      removes_actual_writer(increment))
+        {
+          std::lock_guard<mutex_t> lk(m_writers_cv_mutex);
+#if CW_DEBUG
+          m_writers_cv_mutex_was_locked = true;
+#endif
+          RWSLDout(dc::notice, "m_writers_cv_mutex is locked.");
+          previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+          RWSLDout(dc::finish, get_counters(previous_state) <<  " --> " << get_counters(previous_state + increment));
+          TPY;
+          RWSLDout(dc::notice, "Unlocking m_writers_cv_mutex...");
+        }
+        else
         {
           previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
           RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
           TPY;
-          writer_present_became_false = writer_present(previous_state) && !writer_present(previous_state + increment);
-        }
-        else
-        {
-          {
-            std::lock_guard<mutex_t> lk(m_writers_cv_mutex);
-            previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
-            RWSLDout(dc::finish, get_counters(previous_state) <<  " --> " << get_counters(previous_state + increment));
-            TPY;
-            writer_present_became_false = writer_present(previous_state) && !writer_present(previous_state + increment);
-          }
-          RWSLDout(dc::notice, "Calling m_writers_cv.notify_one()");
-          m_writers_cv.notify_one();
         }
         RWSLDout(dc::notice, "Unlocking m_readers_cv_mutex...");
       }
-      if (writer_present_became_false)
+
+      // If writer_present changed from true to false, wake up all threads that are waiting for a read-lock.
+      if (writer_present(previous_state) && !writer_present(previous_state + increment))
       {
         RWSLDout(dc::notice, "Calling m_readers_cv.notify_all()");
         m_readers_cv.notify_all();
       }
       else
-        RWSLDout(dc::notice, "Not calling notify_all() because writer_present() didn't change.");
-      return previous_state;
-    }
-    // If the result of `converting_or_actual_writer_present` might change from true to false, we should wake up possible threads that are waiting for that.
-    else if constexpr (removes_converting_or_actual_writer(increment))
-    {
-      int64_t previous_state;
+        RWSLDout(dc::notice, "Not calling m_readers_cv.notify_all() because writer_present() didn't change.");
+
+      // If converting_writer_present changed from true to false, wake up all threads that are possibly waiting in rd2wryield.
+      if (converting_writer_present(previous_state) && !converting_writer_present(previous_state + increment))
       {
-        std::lock_guard<mutex_t> lk(m_writers_cv_mutex);
-        previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
-        RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
-        TPY;
+        ASSERT(m_writers_cv_mutex_was_locked);
+        RWSLDout(dc::notice, "Calling m_writers_cv.notify_all()");
+        m_writers_cv.notify_all();
       }
-      RWSLDout(dc::notice, "Calling m_writers_cv.notify_one()");
-      m_writers_cv.notify_one();
+      // Otherwise, if converting_or_actual_writer_present or actual_writer_present changed from true to false, wake up one thread waiting on m_writers_cv.
+      else if ((converting_or_actual_writer_present(previous_state) && !converting_or_actual_writer_present(previous_state + increment)) ||
+               (actual_writer_present(previous_state) && !actual_writer_present(previous_state + increment)))
+      {
+        ASSERT(m_writers_cv_mutex_was_locked);
+        RWSLDout(dc::notice, "Calling m_writers_cv.notify_one()");
+        m_writers_cv.notify_one();
+      }
+      else
+        RWSLDout(dc::notice, "Not calling m_writers_cv.notify_all() because converting_writer_present, converting_or_actual_writer_present and actual_writer_present all didn't change.");
+
       return previous_state;
     }
     else
     {
+      // removes_converting_or_actual_writer can't be true when removes_writer is false.
+      static_assert(!removes_converting_or_actual_writer(increment), "Logic error");
+
       RWSLDout(dc::notice, "Not calling notify_one()");
       // This change might cause threads to leave their spin-loop, but no notify_one is required.
       int64_t previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
@@ -497,9 +742,9 @@ private:
           else
             RWSLDout(dc::finish, "state was " << get_counters(state));
 #endif
-          // In other words: since the following returns false when there are writers present,
-          // we must have m_readers_cv_mutex locked whenever we do a transition that removes
-          // a writer - and do a notify_all after that.
+          // In other words: since the following returns false when there were writers present,
+          // we must have m_readers_cv_mutex locked whenever we do a transition that causes
+          // writer_present to become false - and do a notify_all after that.
           RWSLDout(dc::notice|flush_cf, "Returning " << std::boolalpha << (read_locked || !writer_present(state)) << "; unlocking m_readers_cv_mutex...");
           bool exit_wait = read_locked || !writer_present(state);
 #ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
@@ -594,8 +839,8 @@ private:
             RWSLDout(dc::finish, "state was " << get_counters(state));
 #endif
           // In other words: since the following returns false when there were converting/actual writers present,
-          // we must have m_writers_cv_mutex locked whenever we do a transition that removes a converting/actual
-          // writer - and do a notify_one after that.
+          // we must have m_writers_cv_mutex locked whenever we do a transition that causes
+          // converting_or_actual_writer_present to become false - and do a notify_one after that.
           RWSLDout(dc::notice|flush_cf, "Returning " << std::boolalpha << (write_locked || !converting_or_actual_writer_present(state)) << "; unlocking m_writers_cv_mutex...");
           bool exit_wait = write_locked || !converting_or_actual_writer_present(state);
 #ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
@@ -679,13 +924,13 @@ private:
 #endif
           TPY;
         }
-        while (!write_locked && !actual_writer_present(state)); // Only exit this loop if we succeeded to get the write-lock, or when there
+        while (!write_locked && !actual_writer_present(state)); // Only exit this loop if we succeeded to get the write-lock, or when there are no actual writers present.
 
         // Here, either `write_locked` is true and we succeeded (and will leave this function), or
         // actual_writer_present(state) is true. In that case it is safe to return false and continue
         // to wait for m_writers_cv because that actual writer will call notify_one.
         // Of course that means, again, that we must have m_writers_cv_mutex locked whenever we do a
-        // transition that removes an actual writer - and do a notify_one after that.
+        // transition that causes actual_writer_present to become false - and do a notify_one after that.
         RWSLDout(dc::notice|flush_cf, "Returning " << std::boolalpha << write_locked << "; unlocking m_writers_cv_mutex...");
         bool exit_wait = write_locked;
 #ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
@@ -718,6 +963,9 @@ private:
         if (!exit_wait)
           TPP;    // For the unlock of m_writers_cv_mutex.
 #endif
+        // Since this returns false when there were converting writers present,
+        // we must have m_writers_cv_mutex locked whenever we do a transition that causes
+        // converting_writer_present to become false - and do a notify_all after that.
         return exit_wait;
       });
     }
@@ -846,8 +1094,15 @@ struct AIReadWriteSpinLock_static_assert : AIReadWriteSpinLock
   //===========================================================================================================
   // do_transition tests.
 
+#ifndef DEBUG_STATIC_ASSERTS
   static_assert(test_removes_converting_or_actual_writer(), "removes_converting_or_actual_writer is broken!");
   static_assert(test_removes_writer(), "removes_writer is broken!");
+  static_assert(test_removes_converting_writer(), "removes_converting_writer is broken!");
+#else
+  static void run_test_removes_converting_or_actual_writer() { test_removes_converting_or_actual_writer(); }
+  static void run_test_removes_writer() { test_removes_writer(); }
+  static void run_test_removes_converting_writer() { test_removes_converting_writer(); }
+#endif
 };
 
 #endif
@@ -856,4 +1111,14 @@ struct AIReadWriteSpinLock_static_assert : AIReadWriteSpinLock
 #undef TPY
 #undef TPB
 #undef TPP
+#endif
+
+#ifdef DEBUG_STATIC_ASSERTS
+// Compile as: g++ -x c++ -std=c++20 -I.. -I../cwds -DCWDEBUG -DDEBUG_STATIC_ASSERTS -include "sys.h" AIReadWriteSpinLock.h
+int main()
+{
+  AIReadWriteSpinLock_static_assert::run_test_removes_converting_or_actual_writer();
+  AIReadWriteSpinLock_static_assert::run_test_removes_writer();
+  AIReadWriteSpinLock_static_assert::run_test_removes_converting_writer();
+}
 #endif
