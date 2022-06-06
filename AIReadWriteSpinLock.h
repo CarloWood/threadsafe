@@ -44,9 +44,13 @@
 #include <exception>
 #include <array>
 
+#if (defined(__clang__) && __clang_major__ <= 14) || (defined(CWDEBUG) && defined(DEBUG_STATIC_ASSERTS))
+// Broken compiler - or we're debugging the static_asserts.
+#define consteval constexpr
+#endif
+
 #ifdef CWDEBUG
 #ifdef DEBUG_STATIC_ASSERTS
-#define consteval constexpr
 #undef DEBUG_RWSPINLOCK
 #define DEBUG_RWSPINLOCK 1
 #endif // DEBUG_STATIC_ASSERTS
@@ -1128,12 +1132,6 @@ struct AIReadWriteSpinLock_static_assert : AIReadWriteSpinLock
 
 #endif
 
-#ifndef DEBUG_RWSPINLOCK_THREADPERMUTER
-#undef TPY
-#undef TPB
-#undef TPP
-#endif
-
 #ifdef DEBUG_STATIC_ASSERTS
 // Compile as: g++ -x c++ -std=c++20 -I.. -I../cwds -DCWDEBUG -DDEBUG_STATIC_ASSERTS -include "sys.h" AIReadWriteSpinLock.h
 int main()
@@ -1142,4 +1140,14 @@ int main()
   AIReadWriteSpinLock_static_assert::run_test_removes_writer();
   AIReadWriteSpinLock_static_assert::run_test_removes_converting_writer();
 }
+#endif
+
+// Clean up macros.
+#ifndef DEBUG_RWSPINLOCK_THREADPERMUTER
+#undef TPY
+#undef TPB
+#undef TPP
+#endif
+#if (defined(__clang__) && __clang_major__ <= 14) || (defined(CWDEBUG) && defined(DEBUG_STATIC_ASSERTS))
+#undef consteval
 #endif
