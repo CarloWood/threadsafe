@@ -42,6 +42,7 @@
 #include <atomic>
 #include <thread>
 #include <exception>
+#include <array>
 
 #ifdef CWDEBUG
 #ifdef DEBUG_STATIC_ASSERTS
@@ -614,15 +615,18 @@ class AIReadWriteSpinLock
                       removes_converting_writer(increment) ||
                       removes_actual_writer(increment))
         {
-          std::lock_guard<mutex_t> lk(m_writers_cv_mutex);
+          {
+            std::lock_guard<mutex_t> lk(m_writers_cv_mutex);
 #if CW_DEBUG
-          m_writers_cv_mutex_was_locked = true;
+            m_writers_cv_mutex_was_locked = true;
 #endif
-          RWSLDout(dc::notice, "m_writers_cv_mutex is locked.");
-          previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
-          RWSLDout(dc::finish, get_counters(previous_state) <<  " --> " << get_counters(previous_state + increment));
+            RWSLDout(dc::notice, "m_writers_cv_mutex is locked.");
+            previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+            RWSLDout(dc::finish, get_counters(previous_state) <<  " --> " << get_counters(previous_state + increment));
+            TPY;
+            RWSLDout(dc::notice, "Unlocking m_writers_cv_mutex...");
+          }
           TPY;
-          RWSLDout(dc::notice, "Unlocking m_writers_cv_mutex...");
         }
         else
         {
@@ -632,6 +636,7 @@ class AIReadWriteSpinLock
         }
         RWSLDout(dc::notice, "Unlocking m_readers_cv_mutex...");
       }
+      TPY;
 
       // If writer_present changed from true to false, wake up all threads that are waiting for a read-lock.
       if (writer_present(previous_state) && !writer_present(previous_state + increment))
@@ -923,6 +928,15 @@ private:
             RWSLDout(dc::finish, "state was " << get_counters(state));
 #endif
           TPY;
+          if (write_locked)
+          {
+            // This simulated a do_transition<successful_rd2wrlock>() which requires a m_writers_cv.notify_all() if C became zero.
+            if (!converting_writer_present(state + successful_rd2wrlock))
+            {
+              // Wake up all threads that are potentially waiting in rd2wryield().
+              m_writers_cv.notify_all();
+            }
+          }
         }
         while (!write_locked && !actual_writer_present(state)); // Only exit this loop if we succeeded to get the write-lock, or when there are no actual writers present.
 
@@ -955,9 +969,16 @@ private:
     {
       std::unique_lock<mutex_t> lk(m_writers_cv_mutex);
       TPY;
+      RWSLDout(dc::notice, "Calling m_writers_cv.wait(lk, lambda)");
       m_writers_cv.wait(lk, [this](){
+        RWSLDout(dc::notice, "Inside m_writers_cv.wait()'s lambda; m_writers_cv_mutex is locked.");
+#if DEBUG_RWSPINLOCK
+        int64_t state;
+        bool leave_rd2wryield = !converting_writer_present(state = m_state.load(std::memory_order::relaxed));
+        RWSLDout(dc::notice, "converting_writer_present(" << std::hex << std::setfill('0') << std::setw(16) << state << std::dec << ") = " << std::boolalpha << !leave_rd2wryield);
+#else
         bool leave_rd2wryield = !converting_writer_present(m_state.load(std::memory_order::relaxed));
-        TPY;
+#endif
         bool exit_wait = leave_rd2wryield;
 #ifdef DEBUG_RWSPINLOCK_THREADPERMUTER
         if (!exit_wait)
