@@ -625,7 +625,7 @@ class AIReadWriteSpinLock
             m_writers_cv_mutex_was_locked = true;
 #endif
             RWSLDout(dc::notice, "m_writers_cv_mutex is locked.");
-            previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+            previous_state = m_state.fetch_add(increment, std::memory_order::release);  // Synchronize with rdunlock.
             RWSLDout(dc::finish, get_counters(previous_state) <<  " --> " << get_counters(previous_state + increment));
             TPY;
             RWSLDout(dc::notice, "Unlocking m_writers_cv_mutex...");
@@ -634,6 +634,7 @@ class AIReadWriteSpinLock
         }
         else
         {
+          // Remove a waiting writer.
           previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
           RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
           TPY;
@@ -677,8 +678,17 @@ class AIReadWriteSpinLock
       static_assert(!removes_converting_or_actual_writer(increment), "Logic error");
 
       RWSLDout(dc::notice, "Not calling notify_one()");
-      // This change might cause threads to leave their spin-loop, but no notify_one is required.
-      int64_t previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+      int64_t previous_state;
+      if constexpr (increment == one_rdlock)
+      {
+        // Need to sync with the last wrunlock.
+        previous_state = m_state.fetch_add(increment, std::memory_order::acquire);
+      }
+      else
+      {
+        // This change might cause threads to leave their spin-loop, but no notify_one is required.
+        previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+      }
       RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
       TPY;
       return previous_state;
