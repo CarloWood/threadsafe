@@ -138,13 +138,14 @@ class VoidPointerStorage
   std::vector<void*> m_storage;
   mutable boost::lockfree::stack<index_type> m_free_indices;
 
+ private:
+  void increase_size(uint32_t initial_size = 0);
+
  public:
   VoidPointerStorage(uint32_t initial_size) : m_size(0), m_free_indices(initial_size)
   {
     increase_size(initial_size);
   }
-
-  void increase_size(uint32_t initial_size = 0);
 
   index_type insert(void* value)
   {
@@ -188,19 +189,26 @@ class VoidPointerStorage
 #endif
 };
 
+// Thread-safe pointer storage.
+//
+// Use insert to add new pointers, and erase(pos) to remove them again - where pos is an index returned by insert.
+// That index can also be used to read back the pointer value if needed, using get(pos).
+//
 template<typename T>
 struct PointerStorage : public VoidPointerStorage
 {
+  // Pass the initial size (number of pointers) of the storage to the constructor.
   using VoidPointerStorage::VoidPointerStorage;
 
-  [[gnu::always_inline]] index_type insert(T* value) { return VoidPointerStorage::insert(value); }
-  [[gnu::always_inline]] T* get(index_type pos) { return static_cast<T*>(VoidPointerStorage::get(pos)); }
+  index_type insert(T* value) { return VoidPointerStorage::insert(value); }
+  T* get(index_type pos) { return static_cast<T*>(VoidPointerStorage::get(pos)); }
 
-  void copy(std::vector<T*>& output);
+  // Copy all currently stored pointers to `output`.
+  void for_each(std::function<void(T*)> callback);
 };
 
 template<typename T>
-void PointerStorage<T>::copy(std::vector<T*>& output)
+void PointerStorage<T>::for_each(std::function<void(T*)> callback)
 {
   m_rwlock.wrlock();
   m_free_indices.consume_all([this](index_type index){
@@ -208,7 +216,7 @@ void PointerStorage<T>::copy(std::vector<T*>& output)
   });
   for (void* ptr : m_storage)
     if (ptr)
-      output.push_back(static_cast<T*>(ptr));
+      callback(static_cast<T*>(ptr));
   m_rwlock.wrunlock();
 }
 
