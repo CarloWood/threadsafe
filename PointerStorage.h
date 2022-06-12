@@ -210,13 +210,17 @@ struct PointerStorage : public VoidPointerStorage
 template<typename T>
 void PointerStorage<T>::for_each(std::function<void(T*)> callback)
 {
+  std::vector<index_type> free_indices;
   m_rwlock.wrlock();
-  m_free_indices.consume_all([this](index_type index){
+  m_free_indices.consume_all([this, &free_indices](index_type index){
     m_storage[index] = nullptr;
+    free_indices.push_back(index);
   });
   for (void* ptr : m_storage)
     if (ptr)
       callback(static_cast<T*>(ptr));
+  for (index_type index : free_indices)
+    m_free_indices.bounded_push(index);
   m_rwlock.wrunlock();
 }
 
