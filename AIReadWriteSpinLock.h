@@ -31,6 +31,7 @@
 
 #ifdef CWDEBUG
 // Set to 1 to enable very extentive debug output with regard to this class; as well as enable static_asserts at the end.
+// You'll need to add -fconstexpr-steps=100000000 to CXXFLAGS for the static asserts when this is defined (and DEBUG_STATIC_ASSERTS isn't).
 #define DEBUG_RWSPINLOCK 0
 #endif
 
@@ -102,9 +103,10 @@ class AIReadWriteSpinLock
 
   // Used in certain test.
   static constexpr int64_t sign_bit_r = r << (shift - 1);
-  static constexpr int64_t sign_bit_v = v << (shift - 1);
-  static constexpr int64_t sign_bit_c = c << (shift - 1);
   static constexpr int64_t sign_bit_w = w << (shift - 1);
+  static constexpr int64_t sign_bit_c = c << (shift - 1);
+  static constexpr int64_t sign_bit_v = v << (shift - 1);
+  static constexpr int64_t sign_bits_rwc = sign_bit_r | sign_bit_w | sign_bit_c;
 
   // The bits used for R.
   static constexpr int64_t R_mask = w - 1;
@@ -626,6 +628,9 @@ class AIReadWriteSpinLock
 #endif
             RWSLDout(dc::notice, "m_writers_cv_mutex is locked.");
             previous_state = m_state.fetch_add(increment, std::memory_order::release);  // Synchronize with rdunlock.
+            // Trying to remove a reader, writer or converting writer that isn't there!
+            // Do not call rdunlock or rd2wrlock without having a read-lock; nor call wrunlock or wr2rdlock without having a write-lock.
+            ASSERT(((previous_state + increment) & sign_bits_rwc) == 0);
             RWSLDout(dc::finish, get_counters(previous_state) <<  " --> " << get_counters(previous_state + increment));
             TPY;
             RWSLDout(dc::notice, "Unlocking m_writers_cv_mutex...");
@@ -636,6 +641,9 @@ class AIReadWriteSpinLock
         {
           // Remove a waiting writer.
           previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+          // Trying to remove a reader, writer or converting writer that isn't there!
+          // Do not call rdunlock or rd2wrlock without having a read-lock; nor call wrunlock or wr2rdlock without having a write-lock.
+          ASSERT(((previous_state + increment) & sign_bits_rwc) == 0);
           RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
           TPY;
         }
@@ -683,11 +691,17 @@ class AIReadWriteSpinLock
       {
         // Need to sync with the last wrunlock.
         previous_state = m_state.fetch_add(increment, std::memory_order::acquire);
+        // Trying to remove a reader, writer or converting writer that isn't there!
+        // Do not call rdunlock or rd2wrlock without having a read-lock; nor call wrunlock or wr2rdlock without having a write-lock.
+        ASSERT(((previous_state + increment) & sign_bits_rwc) == 0);
       }
       else
       {
         // This change might cause threads to leave their spin-loop, but no notify_one is required.
         previous_state = m_state.fetch_add(increment, std::memory_order::relaxed);
+        // Trying to remove a reader, writer or converting writer that isn't there!
+        // Do not call rdunlock or rd2wrlock without having a read-lock; nor call wrunlock or wr2rdlock without having a write-lock.
+        ASSERT(((previous_state + increment) & sign_bits_rwc) == 0);
       }
       RWSLDout(dc::finish, get_counters(previous_state) << " --> " << get_counters(previous_state + increment));
       TPY;
@@ -905,6 +919,7 @@ private:
     {
       // Revert what we just did.
       do_transition<-one_rd2wrlock>();
+      RWSLDout(dc::notice, "Throwing std::exception ...");
       throw std::exception();
     }
 
@@ -933,6 +948,9 @@ private:
         do
         {
           state &= ~W_mask;       // Demand W = 0.
+          // Trying to remove a reader and converting writer that aren't both there!
+          // Do not call rdunlock or rd2wrlock without having a read-lock; nor call wrunlock or wr2rdlock without having a write-lock.
+          ASSERT(((state + successful_rd2wrlock) & sign_bits_rwc) == 0);
           write_locked = m_state.compare_exchange_weak(state, state + successful_rd2wrlock, std::memory_order::relaxed, std::memory_order::relaxed);
           RWSLDout(dc::notice|continued_cf, "compare_exchange_weak(" << get_counters(state) << ", " << get_counters(state + successful_rd2wrlock) << ", ...) = " << write_locked << "... ");
 #if DEBUG_RWSPINLOCK
