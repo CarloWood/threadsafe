@@ -144,7 +144,9 @@ class VoidPointerStorage
  public:
   VoidPointerStorage(uint32_t initial_size) : m_size(0), m_free_indices(initial_size)
   {
+    m_rwlock.rdlock();                  // Must have read-lock before calling increase_size!
     increase_size(initial_size);
+    m_rwlock.rdunlock();
   }
 
   index_type insert(void* value)
