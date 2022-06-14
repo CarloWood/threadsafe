@@ -452,8 +452,8 @@ struct ConstReadAccess
 #endif // THREADSAFE_DEBUG
     }
 
-    WRAPPER* m_wrapper;		///< Pointer to the object that we provide access to.
-    state_type const m_state;	///< The lock state that m_wrapper is in.
+    WRAPPER* m_wrapper;         ///< Pointer to the object that we provide access to.
+    state_type const m_state;   ///< The lock state that m_wrapper is in.
 
     // Disallow copy constructing directly.
     ConstReadAccess(ConstReadAccess const&) = delete;
@@ -537,6 +537,7 @@ struct WriteAccess : public ReadAccess<WRAPPER>
     using ConstReadAccess<WRAPPER>::read2writelocked;
     using ConstReadAccess<WRAPPER>::writelocked;
     using ConstReadAccess<WRAPPER>::write2writelocked;
+    using state_type = typename ConstReadAccess<WRAPPER>::state_type;
 
     /// Construct a WriteAccess from a non-constant Wrapper.
     template<typename ...Args>
@@ -547,11 +548,17 @@ struct WriteAccess : public ReadAccess<WRAPPER>
 
     /// Promote read access to write access.
     explicit WriteAccess(ReadAccess<WRAPPER>& access) :
-        ReadAccess<WRAPPER>(*access.m_wrapper, (access.m_state == readlocked) ? read2writelocked : write2writelocked)
+        ReadAccess<WRAPPER>(*access.m_wrapper, write2writelocked)
     {
-      if (this->m_state == read2writelocked)
+      if (access.m_state == readlocked)
       {
 	this->m_wrapper->m_read_write_mutex.rd2wrlock();
+        // We should have initialized the base class with read2writelocked, but if rd2wrlock() throws
+        // then the base class destructor ~ConstReadAccess would call wr2rdlock() as if obtaining the
+        // write-lock had succeeded. In order to stop it from doing that, we did set m_state to
+        // write2writelocked which causes it to do nothing, and only after rd2wrlock() succeeded
+        // we correct this value.
+        const_cast<state_type&>(this->m_state) = read2writelocked;
       }
     }
 
