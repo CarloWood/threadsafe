@@ -205,7 +205,7 @@ struct PointerStorage : public VoidPointerStorage
   index_type insert(T* value) { return VoidPointerStorage::insert(value); }
   T* get(index_type pos) { return static_cast<T*>(VoidPointerStorage::get(pos)); }
 
-  // Copy all currently stored pointers to `output`.
+  // Call callback with all currently stored pointers.
   void for_each(std::function<void(T*)> callback);
 };
 
