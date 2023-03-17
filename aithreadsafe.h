@@ -616,8 +616,8 @@ struct AccessConst
     // If m_primitive_mutex is a ConditionVariable then this can be used to wake up the waiting thread.
     void notify_one() { this->m_wrapper->m_primitive_mutex.notify_one(); }
 
-    // Experimental unlock/relock.
-    void unlock()
+    // Experimental unlock/relock. Const because we must be able to call it on a rat type (which is const).
+    void unlock() const
     {
 #if THREADSAFE_DEBUG
       this->m_wrapper->m_ref--;
@@ -627,7 +627,7 @@ struct AccessConst
     }
 
     // Relock a previously unlocked access object.
-    void relock(WRAPPER const& wrapper)
+    void relock(WRAPPER const& wrapper) const
     {
       m_wrapper = const_cast<WRAPPER*>(&wrapper);
 #if THREADSAFE_DEBUG
@@ -637,13 +637,31 @@ struct AccessConst
     }
 
   protected:
-    WRAPPER* m_wrapper;		///< Pointer to the object that we provide access to.
+    mutable WRAPPER* m_wrapper;		///< Pointer to the object that we provide access to.
 
     // Disallow copy constructing directly.
     AccessConst(AccessConst const&) = delete;
 
     // Move constructor.
     AccessConst(AccessConst&& rvalue) : m_wrapper(rvalue.m_wrapper) { rvalue.m_wrapper = nullptr; }
+};
+
+/**
+ * @brief Write lock object and provide read/write access.
+ */
+template<class WRAPPER>
+struct ConstAccess : public AccessConst<WRAPPER>
+{
+  public:
+    /// Construct a Access from a non-constant Wrapper.
+    template<typename ...Args>
+    explicit ConstAccess(WRAPPER& wrapper, Args&&... args) : AccessConst<WRAPPER>(wrapper, std::forward<Args>(args)...) { }
+
+    /// Access the underlaying object for (read and) write access.
+    typename WRAPPER::data_type const* operator->() const { return this->m_wrapper->ptr(); }
+
+    /// Access the underlaying object for (read and) write access.
+    typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper->ptr(); }
 };
 
 /**
@@ -662,7 +680,22 @@ struct Access : public AccessConst<WRAPPER>
 
     /// Access the underlaying object for (read and) write access.
     typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
+
+    operator ConstAccess<WRAPPER> const&() const
+    {
+      AccessConst<WRAPPER> const& base = *this;
+      // Like a reinterpret_cast, which only works because neither Access nor ConstAccess have members nor virtual functions.
+      return static_cast<ConstAccess<WRAPPER> const&>(base);
+    }
 };
+
+// Explicitly convert a ConstAccess to an Access type.
+template<class WRAPPER>
+Access<WRAPPER> const& wat_cast(ConstAccess<WRAPPER> const& access)
+{
+  AccessConst<WRAPPER> const& base = access;
+  return static_cast<Access<WRAPPER> const&>(base);
+}
 
 /**
  * @brief Access single threaded object for read access.
@@ -767,7 +800,7 @@ class Primitive
     struct access_types
     {
       using const_read_access_type = AccessConst<WRAPPER>;
-      using read_access_type = Access<WRAPPER>;
+      using read_access_type = ConstAccess<WRAPPER>;
       using write_access_type = Access<WRAPPER>;
       using write_to_read_carry = unsupported_w2rCarry<typename WRAPPER::policy_type>;
     };
