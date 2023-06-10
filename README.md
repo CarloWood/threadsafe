@@ -1,4 +1,4 @@
-# ai-threadsafe submodule
+# threadsafe submodule
 
 This repository is a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules)
 providing C++ utilities for larger projects, including:
@@ -11,7 +11,7 @@ providing C++ utilities for larger projects, including:
 * Several utilities like <tt>is_single_threaded</tt>.
 
 The root project should be using
-[autotools](https://en.wikipedia.org/wiki/GNU_Build_System_autotools),
+[cmake](https://cmake.org/overview/)
 [cwm4](https://github.com/CarloWood/cwm4) and
 [libcwd](https://github.com/CarloWood/libcwd).
 
@@ -65,64 +65,47 @@ void v(foo_t& foo)
 }
 ```
 
-## Checking out a project that uses the ai-threadsafe submodule.
+## Checking out a project that uses the threadsafe submodule.
 
-To clone a project example-project that uses ai-threadsafe simply run:
+To clone a project example-project that uses threadsafe simply run:
 
-<pre>
-<b>git clone --recursive</b> &lt;<i>URL-to-project</i>&gt;<b>/example-project.git</b>
-<b>cd example-project</b>
-<b>./autogen.sh</b>
-</pre>
+    git clone --recursive <URL-to-project>/example-project.git
+    cd example-project
+    AUTOGEN_CMAKE_ONLY=1 ./autogen.sh
 
-The <tt>--recursive</tt> is optional because <tt>./autogen.sh</tt> will fix
+The ``--recursive`` is optional because ``./autogen.sh`` will fix
 it when you forgot it.
 
-Afterwards you probably want to use <tt>--enable-mainainer-mode</tt>
-as option to the generated <tt>configure</tt> script.
+When using [GNU autotools](https://en.wikipedia.org/wiki/GNU_Autotools) you should of course
+not set ``AUTOGEN_CMAKE_ONLY``. Also, you probably want to use ``--enable-mainainer-mode``
+as option to the generated ``configure`` script.
 
-## Adding the ai-threadsafe submodule to a project
+In order to use ``cmake`` configure as usual, for example to build with 16 cores a debug build:
+
+    mkdir build_debug
+    cmake -S . -B build_debug -DCMAKE_MESSAGE_LOG_LEVEL=DEBUG -DCMAKE_BUILD_TYPE=Debug -DCMAKE_VERBOSE_MAKEFILE=ON -DEnableDebugGlobal:BOOL=OFF
+    cmake --build build_debug --config Debug --parallel 16
+
+Or to make a release build:
+
+    mkdir build_release
+    cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release
+    cmake --build build_release --config Release --parallel 16
+
+## Adding the threadsafe submodule to a project
 
 To add this submodule to a project, that project should already
-be set up to use [cwm4](https://github.com/CarloWood/cwm4).
+be set up to use [utils](https://github.com/CarloWood/ai-utils).
 
-Simply execute the following in a directory of that project
-where you want to have the <tt>threadsafe</tt> subdirectory:
+Then simply execute the following in a directory of that project
+where you want to have the ``threadsafe`` subdirectory (the
+root of the project is recommended as that is the only thing
+I've tested so far):
 
-<pre>
-git submodule add https://github.com/CarloWood/ai-threadsafe.git threadsafe
-</pre>
+    git submodule add https://github.com/CarloWood/threadsafe.git
 
-This should clone ai-threadsafe into the subdirectory <tt>threadsafe</tt>, or
+This should clone threadsafe into the subdirectory ``threadsafe``, or
 if you already cloned it there, it should add it.
 
-Changes to <tt>configure.ac</tt> and <tt>Makefile.am</tt>
-are taken care of by <tt>cwm4</tt>, except for linking
-which works as usual;
-
-for example, a module that defines a
-
-<pre>
-bin_PROGRAMS = foobar
-</pre>
-
-would also define
-
-<pre>
-foobar_CXXFLAGS = @LIBCWD_R_FLAGS@
-foobar_LDADD = ../threadsafe/libthreadsafe.la ../utils/libutils_r.la ../cwds/libcwds_r.la
-</pre>
-
-or whatever the path to `threadsafe/` etc. is, to link with the required submodules,
-libraries, and assuming you also use the [cwds](https://github.com/CarloWood/cwds) submodule.
-
-Finally, run
-
-<pre>
-./autogen.sh
-</pre>
-
-to let cwm4 do its magic, and commit all the changes.
-
-Checkout [ai-threadsafe-testsuite](https://github.com/CarloWood/ai-threadsafe-testsuite)
+Checkout [threadsafe-testsuite](https://github.com/CarloWood/threadsafe-testsuite)
 for an example of a project that uses this submodule.
