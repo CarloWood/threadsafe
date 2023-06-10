@@ -776,7 +776,7 @@ template<typename T> struct unsupported_w2rCarry
 };
 
 template<class RWMUTEX>
-class ReadWrite
+class ReadWriteAccess
 {
   protected:
     template<class UNLOCKED>
@@ -787,7 +787,12 @@ class ReadWrite
       using write_access_type = WriteAccess<UNLOCKED>;
       using write_to_read_carry = Write2ReadCarry<UNLOCKED>;
     };
+};
 
+template<class RWMUTEX>
+class ReadWrite : public ReadWriteAccess<RWMUTEX>
+{
+  protected:
     template<class UNLOCKED> friend struct ConstReadAccess;
     template<class UNLOCKED> friend struct ReadAccess;
     template<class UNLOCKED> friend struct WriteAccess;
@@ -799,7 +804,7 @@ class ReadWrite
 };
 
 template<class MUTEX>
-class Primitive
+class PrimitiveAccess
 {
   protected:
     template<class UNLOCKED>
@@ -810,14 +815,19 @@ class Primitive
       using write_access_type = Access<UNLOCKED>;
       using write_to_read_carry = unsupported_w2rCarry<typename UNLOCKED::policy_type>;
     };
+};
 
+template<class MUTEX>
+class Primitive : public PrimitiveAccess<MUTEX>
+{
+  protected:
     template<class UNLOCKED> friend struct AccessConst;
     template<class UNLOCKED> friend struct Access;
 
     MUTEX m_primitive_mutex;
 };
 
-class OneThread
+class OneThreadAccess
 {
   protected:
     template<class UNLOCKED>
@@ -828,6 +838,11 @@ class OneThread
       using write_access_type = OTAccess<UNLOCKED>;
       using write_to_read_carry = unsupported_w2rCarry<typename UNLOCKED::policy_type>;
     };
+};
+
+class OneThread : public OneThreadAccess
+{
+  protected:
 
 #if THREADSAFE_DEBUG
     mutable std::thread::id m_thread_id;
