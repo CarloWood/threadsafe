@@ -34,7 +34,7 @@
 #include <mutex>
 #include <vector>
 
-namespace aithreadsafe {
+namespace threadsafe {
 
 // Fast storage for pointers.
 //
@@ -226,4 +226,4 @@ void PointerStorage<T>::for_each(std::function<void(T*)> callback)
   m_rwlock.wrunlock();
 }
 
-} // namespace aithreadsafe
+} // namespace threadsafe

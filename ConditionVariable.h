@@ -30,7 +30,7 @@
 #include "AIMutex.h"
 #include <condition_variable>
 
-namespace aithreadsafe
+namespace threadsafe
 {
 
 // Like std::condition_variable but derived from AIMutex and using that as mutex.
@@ -39,7 +39,7 @@ namespace aithreadsafe
 //
 // Declaration:
 //
-// using foo_type = aithreadsafe::Wrapper<Foo, aithreadsafe::policy::Primitive<aithreadsafe::ConditionVariable>>;
+// using foo_type = threadsafe::Wrapper<Foo, threadsafe::policy::Primitive<threadsafe::ConditionVariable>>;
 // foo_type foo_cv;
 //
 // Waiting:
@@ -64,7 +64,7 @@ class ConditionVariable : public AIMutex
   {
     // Usage:
     //
-    // aithreadsafe::ConditionVariable cv;
+    // threadsafe::ConditionVariable cv;
     //
     //   cv.lock();
     //   cv.wait([](){ return done; });
@@ -81,4 +81,4 @@ class ConditionVariable : public AIMutex
   }
 };
 
-} // namespace aithreadsafe
+} // namespace threadsafe

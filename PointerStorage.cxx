@@ -2,7 +2,7 @@
 #include "PointerStorage.h"
 #include  <algorithm>
 
-namespace aithreadsafe {
+namespace threadsafe {
 
 void VoidPointerStorage::increase_size(uint32_t initial_size)
 {
@@ -58,4 +58,4 @@ bool VoidPointerStorage::debug_empty() const
 }
 #endif
 
-} // namespace aithreadsafe
+} // namespace threadsafe

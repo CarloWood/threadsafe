@@ -8,7 +8,7 @@ libthreadsafe_la_SOURCES = \
     AIReadWriteSpinLock.h
     ConditionVariable.h
 \
-    aithreadsafe.h
+    threadsafe.h
 
 libthreadsafe_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 

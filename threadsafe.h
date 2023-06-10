@@ -2,7 +2,7 @@
  * threadsafe -- Threading utilities: object oriented (read/write) locking and more.
  *
  * @file
- * @brief Implementation of the aithreadsafe namespace.
+ * @brief Implementation of the threadsafe namespace.
  *
  * @Copyright (C) 2010, 2016, 2017  Carlo Wood.
  *
@@ -48,14 +48,19 @@
  *
  *   2015/03/03
  *   - Renamed thread_safe to aithreadsafe and renamed AIThreadSafe
- *     to aithreadsafe::Wrapper.
+ *     to threadsafe::Wrapper.
  *
  *   2016/12/17
  *   - Transfered copyright to Carlo Wood.
+ *
+ *   2023/06/10
+ *   - Renamed namespace aithreadsafe to threadsafe;
+ *     aithreadsafe.h to threadsafe.h and the repository
+ *     itself from ai-threadsafe to threadsafe.
  */
 
 // This file defines a wrapper template class for arbitrary types T
-// (aithreadsafe::Wrapper<T, PolicyMutex>) adding a mutex and locking
+// (threadsafe::Wrapper<T, PolicyMutex>) adding a mutex and locking
 // policy (through PolicyMutex) to the instance and shielding it from
 // access without first being locked.
 //
@@ -84,7 +89,7 @@
 // The typical declaration of a Wrapper object should involve a type alias.
 // For example:
 //
-// using mydata_t = aithreadsafe::Wrapper<MyData, aithreadsafe::policy::Primitive<AIMutex>>;
+// using mydata_t = threadsafe::Wrapper<MyData, threadsafe::policy::Primitive<AIMutex>>;
 // mydata_t data;
 //
 // After which the following access types can be used:
@@ -135,7 +140,7 @@
 #define THREADSAFE_DEBUG 0
 #endif
 
-namespace aithreadsafe
+namespace threadsafe
 {
 
 template<typename T, size_t align = alignof(T), size_t blocksize = align>
@@ -180,7 +185,7 @@ class Bits
  *
  * <code>
  * class Foo { public: Foo(int, int); };	// Some user defined type.
- * using foo_t = aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>>;	// Wrapper type for Foo.
+ * using foo_t = threadsafe::Wrapper<Foo, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;	// Wrapper type for Foo.
  * foo_t foo(2, 3);				// Instantiation of a Foo(2, 3).
  *
  * {
@@ -220,7 +225,7 @@ class Bits
  * For example,
  *
  * <code>
- * using foo_t = aithreadsafe::Wrapper<Foo, aithreadsafe::policy::ReadWrite<AIReadWriteMutex>>;
+ * using foo_t = threadsafe::Wrapper<Foo, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
  * foo_t foo;
  *
  * void f(foo_t::rat& foo_r)		// Sometimes needs to write to foo_r.
@@ -345,7 +350,7 @@ class Bits
  * block approach.
  */
 template<typename T, typename POLICY_MUTEX, size_t align = alignof(T), size_t blocksize = align>
-class Wrapper : public aithreadsafe::Bits<T, align, blocksize>, public POLICY_MUTEX
+class Wrapper : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUTEX
 {
   public:
     using data_type = T;
@@ -371,7 +376,7 @@ class Wrapper : public aithreadsafe::Bits<T, align, blocksize>, public POLICY_MU
       : m_ref(0)
 #endif // THREADSAFE_DEBUG
     {
-      new (aithreadsafe::Bits<T, align, blocksize>::ptr()) T(std::forward<ARGS>(args)...);
+      new (threadsafe::Bits<T, align, blocksize>::ptr()) T(std::forward<ARGS>(args)...);
     }
 
 #if THREADSAFE_DEBUG
@@ -829,4 +834,4 @@ class OneThread
 };
 
 } // namespace policy
-} // namespace aithreadsafe
+} // namespace threadsafe

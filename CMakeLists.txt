@@ -31,7 +31,7 @@ target_sources(threadsafe_ObjLib
     "ConditionVariable.h"
     "PointerStorage.h"
 
-    "aithreadsafe.h"
+    "threadsafe.h"
 )
 
 # Required include search-paths.
