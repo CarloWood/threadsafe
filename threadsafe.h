@@ -54,13 +54,15 @@
  *   - Transfered copyright to Carlo Wood.
  *
  *   2023/06/10
- *   - Renamed namespace aithreadsafe to threadsafe;
- *     aithreadsafe.h to threadsafe.h and the repository
- *     itself from ai-threadsafe to threadsafe.
+ *   - Renamed the repository from ai-threadsafe to threadsafe.
+ *   - Renamed namespace aithreadsafe to threadsafe.
+ *   - Renamed aithreadsafe.h to threadsafe.h.
+ *   - Renamed Wrapper to Unlocked.
+ *   - Renamed wrapper_cast to unlocked_cast.
  */
 
 // This file defines a wrapper template class for arbitrary types T
-// (threadsafe::Wrapper<T, PolicyMutex>) adding a mutex and locking
+// (threadsafe::Unlocked<T, PolicyMutex>) adding a mutex and locking
 // policy (through PolicyMutex) to the instance and shielding it from
 // access without first being locked.
 //
@@ -86,10 +88,10 @@
 // read-only access and read/write access, even for the primitive (and
 // one thread) policies.
 //
-// The typical declaration of a Wrapper object should involve a type alias.
+// The typical declaration of an Unlocked object should involve a type alias.
 // For example:
 //
-// using mydata_t = threadsafe::Wrapper<MyData, threadsafe::policy::Primitive<AIMutex>>;
+// using mydata_t = threadsafe::Unlocked<MyData, threadsafe::policy::Primitive<AIMutex>>;
 // mydata_t data;
 //
 // After which the following access types can be used:
@@ -98,18 +100,17 @@
 // mydata_t::rat  : Read Access Type.
 // mydata_t::wat  : (read/)Write Access Type.
 //
-// crat (const read access type) provides read-only access to a const Wrapper
-// and cannot be converted to a wat (write access type).
+// crat (const read access type) provides read-only access to a const Unlocked
+// wrapper and cannot be converted to a wat (write access type).
 //
-// rat (read access type) provides read access to a non-const Wrapper and can
-// be converted to a wat; however such conversion can throw a std::exception.
+// rat (read access type) provides read access to a non-const Unlocked wrapper
+// and can be converted to a wat; however such conversion can throw a std::exception.
 // If that happens then the rat must be destroyed (catch the exception outside
 // of its scope) followed by calling rd2wryield(). After that one can loop
-// back and recreate the rat. See the documentation of Wrapper for more
-// details.
+// back and recreate the rat. See the documentation of Unlocked for more details.
 //
 // wat (write access type) provides (read and) write access to a non-const
-// Wrapper. It can safely be converted to a rat, for example by passing it
+// Unlocked wrapper. It can safely be converted to a rat, for example by passing it
 // to a function that takes a rat, but that doesn't release the write lock
 // of course. The write lock is only released when the wat is destructed.
 //
@@ -118,7 +119,7 @@
 // A w2rCarry cannot be used to access the underlaying data, nor does it contain
 // a mutex itself, but it allows one to convert a write access into a read
 // access without the risk of having an exception being thrown. See the
-// documentation of Wrapper for more details.
+// documentation of Unlocked for more details.
 
 #pragma once
 
@@ -151,7 +152,7 @@ class Bits
            alignment = boost::integer::static_lcm<align, alignof(T)>::value };	// Properly aligned for T and aligned to 'align'.
 
   private:
-    // AIThreadSafe is a wrapper around an instance of T.
+    // Unlocked (and Bits) is a wrapper around an instance of T.
     // Because T might not have a default constructor, it is constructed
     // 'in place', with placement new, in the storage reserved here.
     //
@@ -169,8 +170,8 @@ class Bits
 
     // Cast a T* back to Bits<T, align, blocksize>. This is the inverse of storage().
     // This assumes that addressof(m_storage) == this, in storage().
-    static Bits<T, align, blocksize>* wrapper_cast(T* ptr) { return reinterpret_cast<Bits<T, align, blocksize>*>(ptr); }
-    static Bits<T, align, blocksize> const* wrapper_cast(T const* ptr) { return reinterpret_cast<Bits<T, align, blocksize> const*>(ptr); }
+    static Bits<T, align, blocksize>* unlocked_cast(T* ptr) { return reinterpret_cast<Bits<T, align, blocksize>*>(ptr); }
+    static Bits<T, align, blocksize> const* unlocked_cast(T const* ptr) { return reinterpret_cast<Bits<T, align, blocksize> const*>(ptr); }
 
   protected:
     // Accessors.
@@ -185,7 +186,7 @@ class Bits
  *
  * <code>
  * class Foo { public: Foo(int, int); };	// Some user defined type.
- * using foo_t = threadsafe::Wrapper<Foo, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;	// Wrapper type for Foo.
+ * using foo_t = threadsafe::Unlocked<Foo, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;	// Wrapper type for Foo.
  * foo_t foo(2, 3);				// Instantiation of a Foo(2, 3).
  *
  * {
@@ -225,7 +226,7 @@ class Bits
  * For example,
  *
  * <code>
- * using foo_t = threadsafe::Wrapper<Foo, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
+ * using foo_t = threadsafe::Unlocked<Foo, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
  * foo_t foo;
  *
  * void f(foo_t::rat& foo_r)		// Sometimes needs to write to foo_r.
@@ -350,17 +351,17 @@ class Bits
  * block approach.
  */
 template<typename T, typename POLICY_MUTEX, size_t align = alignof(T), size_t blocksize = align>
-class Wrapper : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUTEX
+class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUTEX
 {
   public:
     using data_type = T;
     using policy_type = POLICY_MUTEX;
 
     // The access types.
-    using crat = typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::const_read_access_type;
-    using rat = typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::read_access_type;
-    using wat = typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_access_type;
-    using w2rCarry = typename POLICY_MUTEX::template access_types<Wrapper<T, POLICY_MUTEX>>::write_to_read_carry;
+    using crat = typename POLICY_MUTEX::template access_types<Unlocked<T, POLICY_MUTEX>>::const_read_access_type;
+    using rat = typename POLICY_MUTEX::template access_types<Unlocked<T, POLICY_MUTEX>>::read_access_type;
+    using wat = typename POLICY_MUTEX::template access_types<Unlocked<T, POLICY_MUTEX>>::write_access_type;
+    using w2rCarry = typename POLICY_MUTEX::template access_types<Unlocked<T, POLICY_MUTEX>>::write_to_read_carry;
 
     // Only these may access the object (through ptr()).
     friend crat;
@@ -371,7 +372,7 @@ class Wrapper : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUTE
   public:
     // Allow arbitrary parameters to be passed for construction.
     template<typename... ARGS>
-    Wrapper(ARGS&&... args)
+    Unlocked(ARGS&&... args)
 #if THREADSAFE_DEBUG
       : m_ref(0)
 #endif // THREADSAFE_DEBUG
@@ -384,7 +385,7 @@ class Wrapper : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUTE
     std::atomic<int> m_ref;
 
   public:
-    ~Wrapper()
+    ~Unlocked()
     {
       // Can only be locked when there still exists an Access object that
       // references this object and will access it upon destruction.
@@ -401,7 +402,7 @@ class Wrapper : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUTE
 /**
  * @brief Read lock object and provide read access.
  */
-template<class WRAPPER>
+template<class UNLOCKED>
 struct ConstReadAccess
 {
   public:
@@ -415,149 +416,149 @@ struct ConstReadAccess
       carrylocked	///< A ReadAccess constructed from a Write2ReadCarry.
     };
 
-    /// Construct a ConstReadAccess from a constant Wrapper.
+    /// Construct a ConstReadAccess from a constant Unlocked.
     template<typename ...Args>
-    ConstReadAccess(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper)), m_state(readlocked)
+    ConstReadAccess(UNLOCKED const& unlocked, Args&&... args) : m_unlocked(const_cast<UNLOCKED*>(&unlocked)), m_state(readlocked)
     {
 #if THREADSAFE_DEBUG
-      m_wrapper->m_ref++;
+      m_unlocked->m_ref++;
 #endif // THREADSAFE_DEBUG
-      m_wrapper->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
+      m_unlocked->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
     }
 
     /// Destruct the Access object.
     // These should never be dynamically allocated, so there is no need to make this virtual.
     ~ConstReadAccess()
     {
-      if (AI_UNLIKELY(!m_wrapper))
+      if (AI_UNLIKELY(!m_unlocked))
         return;
       if (m_state == readlocked)
-	m_wrapper->m_read_write_mutex.rdunlock();
+	m_unlocked->m_read_write_mutex.rdunlock();
       else if (m_state == writelocked)
-	m_wrapper->m_read_write_mutex.wrunlock();
+	m_unlocked->m_read_write_mutex.wrunlock();
       else if (m_state == read2writelocked)
-	m_wrapper->m_read_write_mutex.wr2rdlock();
+	m_unlocked->m_read_write_mutex.wr2rdlock();
 #if THREADSAFE_DEBUG
-      m_wrapper->m_ref--;
+      m_unlocked->m_ref--;
 #endif // THREADSAFE_DEBUG
     }
 
     /// Access the underlaying object for read access.
-    typename WRAPPER::data_type const* operator->() const { return m_wrapper->ptr(); }
+    typename UNLOCKED::data_type const* operator->() const { return m_unlocked->ptr(); }
 
     /// Access the underlaying object for read access.
-    typename WRAPPER::data_type const& operator*() const { return *m_wrapper->ptr(); }
+    typename UNLOCKED::data_type const& operator*() const { return *m_unlocked->ptr(); }
 
   protected:
     /// Constructor used by ReadAccess.
-    ConstReadAccess(WRAPPER& wrapper, state_type state) : m_wrapper(&wrapper), m_state(state)
+    ConstReadAccess(UNLOCKED& unlocked, state_type state) : m_unlocked(&unlocked), m_state(state)
     {
 #if THREADSAFE_DEBUG
-      m_wrapper->m_ref++;
+      m_unlocked->m_ref++;
 #endif // THREADSAFE_DEBUG
     }
 
-    WRAPPER* m_wrapper;         ///< Pointer to the object that we provide access to.
-    state_type const m_state;   ///< The lock state that m_wrapper is in.
+    UNLOCKED* m_unlocked;         ///< Pointer to the object that we provide access to.
+    state_type const m_state;   ///< The lock state that m_unlocked is in.
 
     // Disallow copy constructing directly.
     ConstReadAccess(ConstReadAccess const&) = delete;
 
     // Move constructor.
-    ConstReadAccess(ConstReadAccess&& rvalue) : m_wrapper(rvalue.m_wrapper), m_state(rvalue.m_state) { rvalue.m_wrapper = nullptr; }
+    ConstReadAccess(ConstReadAccess&& rvalue) : m_unlocked(rvalue.m_unlocked), m_state(rvalue.m_state) { rvalue.m_unlocked = nullptr; }
 };
 
-template<class WRAPPER> struct ReadAccess;
-template<class WRAPPER> struct WriteAccess;
+template<class UNLOCKED> struct ReadAccess;
+template<class UNLOCKED> struct WriteAccess;
 
 /**
  * @brief Allow to carry the read access from a wat to a rat.
  */
-template<class WRAPPER>
+template<class UNLOCKED>
 class Write2ReadCarry
 {
   private:
-    WRAPPER& m_wrapper;
+    UNLOCKED& m_unlocked;
     bool m_used;
 
   public:
-    explicit Write2ReadCarry(WRAPPER& wrapper) : m_wrapper(wrapper), m_used(false)
+    explicit Write2ReadCarry(UNLOCKED& unlocked) : m_unlocked(unlocked), m_used(false)
     {
 #if THREADSAFE_DEBUG
-      m_wrapper.m_ref++;
+      m_unlocked.m_ref++;
 #endif // THREADSAFE_DEBUG
     }
     ~Write2ReadCarry()
     {
 #if THREADSAFE_DEBUG
-      m_wrapper.m_ref--;
+      m_unlocked.m_ref--;
 #endif // THREADSAFE_DEBUG
       if (m_used)
-	m_wrapper.m_read_write_mutex.rdunlock();
+	m_unlocked.m_read_write_mutex.rdunlock();
     }
 
-    friend struct WriteAccess<WRAPPER>;
-    friend struct ReadAccess<WRAPPER>;
+    friend struct WriteAccess<UNLOCKED>;
+    friend struct ReadAccess<UNLOCKED>;
 };
 
 /**
  * @brief Read lock object and provide read access, with possible promotion to write access.
  */
-template<class WRAPPER>
-struct ReadAccess : public ConstReadAccess<WRAPPER>
+template<class UNLOCKED>
+struct ReadAccess : public ConstReadAccess<UNLOCKED>
 {
   public:
-    using state_type = typename ConstReadAccess<WRAPPER>::state_type;
-    using ConstReadAccess<WRAPPER>::readlocked;
-    using ConstReadAccess<WRAPPER>::carrylocked;
+    using state_type = typename ConstReadAccess<UNLOCKED>::state_type;
+    using ConstReadAccess<UNLOCKED>::readlocked;
+    using ConstReadAccess<UNLOCKED>::carrylocked;
 
-    /// Construct a ReadAccess from a non-constant Wrapper.
+    /// Construct a ReadAccess from a non-constant Unlocked.
     template<typename ...Args>
-    explicit ReadAccess(WRAPPER& wrapper, Args&&... args) : ConstReadAccess<WRAPPER>(wrapper, readlocked)
+    explicit ReadAccess(UNLOCKED& unlocked, Args&&... args) : ConstReadAccess<UNLOCKED>(unlocked, readlocked)
     {
-      this->m_wrapper->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
+      this->m_unlocked->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
     }
 
-    /// Construct a ReadAccess from a Write2ReadCarry object containing an read locked Wrapper. Upon destruction leave the Wrapper read locked.
-    explicit ReadAccess(Write2ReadCarry<WRAPPER> const& w2rc) : ConstReadAccess<WRAPPER>(w2rc.m_wrapper, carrylocked)
+    /// Construct a ReadAccess from a Write2ReadCarry object containing an read locked Unlocked. Upon destruction leave the Unlocked read locked.
+    explicit ReadAccess(Write2ReadCarry<UNLOCKED> const& w2rc) : ConstReadAccess<UNLOCKED>(w2rc.m_unlocked, carrylocked)
     {
       assert(w2rc.m_used); // Always pass a w2rCarry to a wat first.
     }
 
   protected:
     /// Constructor used by WriteAccess.
-    ReadAccess(WRAPPER& wrapper, state_type state) : ConstReadAccess<WRAPPER>(wrapper, state) { }
+    ReadAccess(UNLOCKED& unlocked, state_type state) : ConstReadAccess<UNLOCKED>(unlocked, state) { }
 
-    friend struct WriteAccess<WRAPPER>;
+    friend struct WriteAccess<UNLOCKED>;
 };
 
 /**
  * @brief Write lock object and provide read/write access.
  */
-template<class WRAPPER>
-struct WriteAccess : public ReadAccess<WRAPPER>
+template<class UNLOCKED>
+struct WriteAccess : public ReadAccess<UNLOCKED>
 {
   public:
-    using ConstReadAccess<WRAPPER>::readlocked;
-    using ConstReadAccess<WRAPPER>::read2writelocked;
-    using ConstReadAccess<WRAPPER>::writelocked;
-    using ConstReadAccess<WRAPPER>::write2writelocked;
-    using state_type = typename ConstReadAccess<WRAPPER>::state_type;
+    using ConstReadAccess<UNLOCKED>::readlocked;
+    using ConstReadAccess<UNLOCKED>::read2writelocked;
+    using ConstReadAccess<UNLOCKED>::writelocked;
+    using ConstReadAccess<UNLOCKED>::write2writelocked;
+    using state_type = typename ConstReadAccess<UNLOCKED>::state_type;
 
-    /// Construct a WriteAccess from a non-constant Wrapper.
+    /// Construct a WriteAccess from a non-constant Unlocked.
     template<typename ...Args>
-    explicit WriteAccess(WRAPPER& wrapper, Args&&... args) : ReadAccess<WRAPPER>(wrapper, writelocked)
+    explicit WriteAccess(UNLOCKED& unlocked, Args&&... args) : ReadAccess<UNLOCKED>(unlocked, writelocked)
     {
-      this->m_wrapper->m_read_write_mutex.wrlock(std::forward<Args>(args)...);
+      this->m_unlocked->m_read_write_mutex.wrlock(std::forward<Args>(args)...);
     }
 
     /// Promote read access to write access.
-    explicit WriteAccess(ReadAccess<WRAPPER>& access) :
-        ReadAccess<WRAPPER>(*access.m_wrapper, write2writelocked)
+    explicit WriteAccess(ReadAccess<UNLOCKED>& access) :
+        ReadAccess<UNLOCKED>(*access.m_unlocked, write2writelocked)
     {
       if (access.m_state == readlocked)
       {
-	this->m_wrapper->m_read_write_mutex.rd2wrlock();
+	this->m_unlocked->m_read_write_mutex.rd2wrlock();
         // We should have initialized the base class with read2writelocked, but if rd2wrlock() throws
         // then the base class destructor ~ConstReadAccess would call wr2rdlock() as if obtaining the
         // write-lock had succeeded. In order to stop it from doing that, we did set m_state to
@@ -567,198 +568,198 @@ struct WriteAccess : public ReadAccess<WRAPPER>
       }
     }
 
-    /// Construct a WriteAccess from a Write2ReadCarry object containing an unlocked Wrapper. Upon destruction leave the Wrapper read locked.
-    explicit WriteAccess(Write2ReadCarry<WRAPPER>& w2rc) : ReadAccess<WRAPPER>(w2rc.m_wrapper, read2writelocked)
+    /// Construct a WriteAccess from a Write2ReadCarry object containing an unlocked Unlocked. Upon destruction leave the Unlocked read locked.
+    explicit WriteAccess(Write2ReadCarry<UNLOCKED>& w2rc) : ReadAccess<UNLOCKED>(w2rc.m_unlocked, read2writelocked)
     {
       assert(!w2rc.m_used); // Always pass a w2rCarry to the wat first. There can only be one wat.
       w2rc.m_used = true;
-      this->m_wrapper->m_read_write_mutex.wrlock();
+      this->m_unlocked->m_read_write_mutex.wrlock();
     }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type& operator*() const { return *this->m_unlocked->ptr(); }
 };
 
 /**
  * @brief Write lock object and provide read access.
  */
-template<class WRAPPER>
+template<class UNLOCKED>
 struct AccessConst
 {
-    /// Construct a AccessConst from a constant Wrapper.
+    /// Construct a AccessConst from a constant Unlocked.
     template<typename ...Args>
-    AccessConst(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper))
+    AccessConst(UNLOCKED const& unlocked, Args&&... args) : m_unlocked(const_cast<UNLOCKED*>(&unlocked))
     {
 #if THREADSAFE_DEBUG
-      m_wrapper->m_ref++;
+      m_unlocked->m_ref++;
 #endif // THREADSAFE_DEBUG
-      this->m_wrapper->m_primitive_mutex.lock(std::forward<Args>(args)...);
+      this->m_unlocked->m_primitive_mutex.lock(std::forward<Args>(args)...);
     }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type const* operator->() const { return this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type const* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type const& operator*() const { return *this->m_unlocked->ptr(); }
 
     ~AccessConst()
     {
-      if (AI_LIKELY(this->m_wrapper))
+      if (AI_LIKELY(this->m_unlocked))
       {
 #if THREADSAFE_DEBUG
-        this->m_wrapper->m_ref--;
+        this->m_unlocked->m_ref--;
 #endif // THREADSAFE_DEBUG
-        this->m_wrapper->m_primitive_mutex.unlock();
+        this->m_unlocked->m_primitive_mutex.unlock();
       }
     }
 
     // If m_primitive_mutex is a ConditionVariable, then this can be used to wait for a signal.
     template<typename Predicate>
-    void wait(Predicate pred) { this->m_wrapper->m_primitive_mutex.wait(pred); }
+    void wait(Predicate pred) { this->m_unlocked->m_primitive_mutex.wait(pred); }
     // If m_primitive_mutex is a ConditionVariable then this can be used to wake up the waiting thread.
-    void notify_one() { this->m_wrapper->m_primitive_mutex.notify_one(); }
+    void notify_one() { this->m_unlocked->m_primitive_mutex.notify_one(); }
 
     // Experimental unlock/relock. Const because we must be able to call it on a rat type (which is const).
     void unlock() const
     {
 #if THREADSAFE_DEBUG
-      this->m_wrapper->m_ref--;
+      this->m_unlocked->m_ref--;
 #endif // THREADSAFE_DEBUG
-      this->m_wrapper->m_primitive_mutex.unlock();
-      this->m_wrapper = nullptr;
+      this->m_unlocked->m_primitive_mutex.unlock();
+      this->m_unlocked = nullptr;
     }
 
     // Relock a previously unlocked access object.
-    void relock(WRAPPER const& wrapper) const
+    void relock(UNLOCKED const& unlocked) const
     {
-      m_wrapper = const_cast<WRAPPER*>(&wrapper);
+      m_unlocked = const_cast<UNLOCKED*>(&unlocked);
 #if THREADSAFE_DEBUG
-      m_wrapper->m_ref++;
+      m_unlocked->m_ref++;
 #endif // THREADSAFE_DEBUG
-      this->m_wrapper->m_primitive_mutex.lock();
+      this->m_unlocked->m_primitive_mutex.lock();
     }
 
   protected:
-    mutable WRAPPER* m_wrapper;		///< Pointer to the object that we provide access to.
+    mutable UNLOCKED* m_unlocked;		///< Pointer to the object that we provide access to.
 
     // Disallow copy constructing directly.
     AccessConst(AccessConst const&) = delete;
 
     // Move constructor.
-    AccessConst(AccessConst&& rvalue) : m_wrapper(rvalue.m_wrapper) { rvalue.m_wrapper = nullptr; }
+    AccessConst(AccessConst&& rvalue) : m_unlocked(rvalue.m_unlocked) { rvalue.m_unlocked = nullptr; }
 };
 
 /**
  * @brief Write lock object and provide read/write access.
  */
-template<class WRAPPER>
-struct ConstAccess : public AccessConst<WRAPPER>
+template<class UNLOCKED>
+struct ConstAccess : public AccessConst<UNLOCKED>
 {
   public:
-    /// Construct a Access from a non-constant Wrapper.
+    /// Construct a Access from a non-constant Unlocked.
     template<typename ...Args>
-    explicit ConstAccess(WRAPPER& wrapper, Args&&... args) : AccessConst<WRAPPER>(wrapper, std::forward<Args>(args)...) { }
+    explicit ConstAccess(UNLOCKED& unlocked, Args&&... args) : AccessConst<UNLOCKED>(unlocked, std::forward<Args>(args)...) { }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type const* operator->() const { return this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type const* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type const& operator*() const { return *this->m_unlocked->ptr(); }
 };
 
 /**
  * @brief Write lock object and provide read/write access.
  */
-template<class WRAPPER>
-struct Access : public AccessConst<WRAPPER>
+template<class UNLOCKED>
+struct Access : public AccessConst<UNLOCKED>
 {
   public:
-    /// Construct a Access from a non-constant Wrapper.
+    /// Construct a Access from a non-constant Unlocked.
     template<typename ...Args>
-    explicit Access(WRAPPER& wrapper, Args&&... args) : AccessConst<WRAPPER>(wrapper, std::forward<Args>(args)...) { }
+    explicit Access(UNLOCKED& unlocked, Args&&... args) : AccessConst<UNLOCKED>(unlocked, std::forward<Args>(args)...) { }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type& operator*() const { return *this->m_unlocked->ptr(); }
 
-    operator ConstAccess<WRAPPER> const&() const
+    operator ConstAccess<UNLOCKED> const&() const
     {
-      AccessConst<WRAPPER> const& base = *this;
+      AccessConst<UNLOCKED> const& base = *this;
       // Like a reinterpret_cast, which only works because neither Access nor ConstAccess have members nor virtual functions.
-      return static_cast<ConstAccess<WRAPPER> const&>(base);
+      return static_cast<ConstAccess<UNLOCKED> const&>(base);
     }
 };
 
 // Explicitly convert a ConstAccess to an Access type.
-template<class WRAPPER>
-Access<WRAPPER> const& wat_cast(ConstAccess<WRAPPER> const& access)
+template<class UNLOCKED>
+Access<UNLOCKED> const& wat_cast(ConstAccess<UNLOCKED> const& access)
 {
-  AccessConst<WRAPPER> const& base = access;
-  return static_cast<Access<WRAPPER> const&>(base);
+  AccessConst<UNLOCKED> const& base = access;
+  return static_cast<Access<UNLOCKED> const&>(base);
 }
 
 /**
  * @brief Access single threaded object for read access.
  */
-template<class WRAPPER>
+template<class UNLOCKED>
 struct OTAccessConst
 {
   public:
-    /// Construct a OTAccessConst from a constant Wrapper.
+    /// Construct a OTAccessConst from a constant Unlocked.
     template<typename ...Args>
-    OTAccessConst(WRAPPER const& wrapper, Args&&... args) : m_wrapper(const_cast<WRAPPER*>(&wrapper), std::forward<Args>(args)...)
+    OTAccessConst(UNLOCKED const& unlocked, Args&&... args) : m_unlocked(const_cast<UNLOCKED*>(&unlocked), std::forward<Args>(args)...)
     {
 #if THREADSAFE_DEBUG
-      m_wrapper->m_ref++;
-      assert(aithreadid::is_single_threaded(wrapper.m_thread_id));
+      m_unlocked->m_ref++;
+      assert(aithreadid::is_single_threaded(unlocked.m_thread_id));
 #endif // THREADSAFE_DEBUG
     }
 
 #if THREADSAFE_DEBUG
     ~OTAccessConst()
     {
-      if (this->m_wrapper)
-        m_wrapper->m_ref--;
+      if (this->m_unlocked)
+        m_unlocked->m_ref--;
     }
 #endif // THREADSAFE_DEBUG
 
     /// Access the underlaying object for read access.
-    typename WRAPPER::data_type const* operator->() const { return this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type const* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for read write access.
-    typename WRAPPER::data_type const& operator*() const { return *this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type const& operator*() const { return *this->m_unlocked->ptr(); }
 
   protected:
-    WRAPPER* m_wrapper;		///< Pointer to the object that we provide access to.
+    UNLOCKED* m_unlocked;		///< Pointer to the object that we provide access to.
 
     // Disallow copy constructing directly.
     OTAccessConst(OTAccessConst const&) = delete;
 
     // Move constructor.
-    OTAccessConst(OTAccessConst&& rvalue) : m_wrapper(rvalue.m_wrapper) { rvalue.m_wrapper = nullptr; }
+    OTAccessConst(OTAccessConst&& rvalue) : m_unlocked(rvalue.m_unlocked) { rvalue.m_unlocked = nullptr; }
 };
 
 /**
  * @brief Access single threaded object for read/write access.
  */
-template<class WRAPPER>
-struct OTAccess : public OTAccessConst<WRAPPER>
+template<class UNLOCKED>
+struct OTAccess : public OTAccessConst<UNLOCKED>
 {
   public:
-    /// Construct a OTAccess from a non-constant Wrapper.
+    /// Construct a OTAccess from a non-constant Unlocked.
     template<typename ...Args>
-    explicit OTAccess(WRAPPER& wrapper, Args&&... args) : OTAccessConst<WRAPPER>(wrapper, std::forward<Args>(args)...) { }
+    explicit OTAccess(UNLOCKED& unlocked, Args&&... args) : OTAccessConst<UNLOCKED>(unlocked, std::forward<Args>(args)...) { }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type* operator->() const { return this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for (read and) write access.
-    typename WRAPPER::data_type& operator*() const { return *this->m_wrapper->ptr(); }
+    typename UNLOCKED::data_type& operator*() const { return *this->m_unlocked->ptr(); }
 };
 
 namespace policy
@@ -778,18 +779,18 @@ template<class RWMUTEX>
 class ReadWrite
 {
   protected:
-    template<class WRAPPER>
+    template<class UNLOCKED>
     struct access_types
     {
-      using const_read_access_type = ConstReadAccess<WRAPPER>;
-      using read_access_type = ReadAccess<WRAPPER>;
-      using write_access_type = WriteAccess<WRAPPER>;
-      using write_to_read_carry = Write2ReadCarry<WRAPPER>;
+      using const_read_access_type = ConstReadAccess<UNLOCKED>;
+      using read_access_type = ReadAccess<UNLOCKED>;
+      using write_access_type = WriteAccess<UNLOCKED>;
+      using write_to_read_carry = Write2ReadCarry<UNLOCKED>;
     };
 
-    template<class WRAPPER> friend struct ConstReadAccess;
-    template<class WRAPPER> friend struct ReadAccess;
-    template<class WRAPPER> friend struct WriteAccess;
+    template<class UNLOCKED> friend struct ConstReadAccess;
+    template<class UNLOCKED> friend struct ReadAccess;
+    template<class UNLOCKED> friend struct WriteAccess;
 
     RWMUTEX m_read_write_mutex;
 
@@ -801,17 +802,17 @@ template<class MUTEX>
 class Primitive
 {
   protected:
-    template<class WRAPPER>
+    template<class UNLOCKED>
     struct access_types
     {
-      using const_read_access_type = AccessConst<WRAPPER>;
-      using read_access_type = ConstAccess<WRAPPER>;
-      using write_access_type = Access<WRAPPER>;
-      using write_to_read_carry = unsupported_w2rCarry<typename WRAPPER::policy_type>;
+      using const_read_access_type = AccessConst<UNLOCKED>;
+      using read_access_type = ConstAccess<UNLOCKED>;
+      using write_access_type = Access<UNLOCKED>;
+      using write_to_read_carry = unsupported_w2rCarry<typename UNLOCKED::policy_type>;
     };
 
-    template<class WRAPPER> friend struct AccessConst;
-    template<class WRAPPER> friend struct Access;
+    template<class UNLOCKED> friend struct AccessConst;
+    template<class UNLOCKED> friend struct Access;
 
     MUTEX m_primitive_mutex;
 };
@@ -819,13 +820,13 @@ class Primitive
 class OneThread
 {
   protected:
-    template<class WRAPPER>
+    template<class UNLOCKED>
     struct access_types
     {
-      using const_read_access_type = OTAccessConst<WRAPPER>;
-      using read_access_type = OTAccess<WRAPPER>;
-      using write_access_type = OTAccess<WRAPPER>;
-      using write_to_read_carry = unsupported_w2rCarry<typename WRAPPER::policy_type>;
+      using const_read_access_type = OTAccessConst<UNLOCKED>;
+      using read_access_type = OTAccess<UNLOCKED>;
+      using write_access_type = OTAccess<UNLOCKED>;
+      using write_to_read_carry = unsupported_w2rCarry<typename UNLOCKED::policy_type>;
     };
 
 #if THREADSAFE_DEBUG
