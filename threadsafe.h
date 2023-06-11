@@ -124,6 +124,7 @@
 #pragma once
 
 #include "utils/threading/aithreadid.h"
+#include "utils/AIRefCount.h"
 
 #include <new>
 #include <cstddef>
@@ -141,11 +142,7 @@
 #define THREADSAFE_DEBUG 0
 #endif
 
-namespace threadsafe
-{
-
-template<typename BASE, typename POLICY_MUTEX>
-class UnlockedBase;
+namespace threadsafe {
 
 template<typename T, size_t align = alignof(T), size_t blocksize = align>
 class Bits
@@ -177,13 +174,21 @@ class Bits
     static Bits<T, align, blocksize> const* unlocked_cast(T const* ptr) { return reinterpret_cast<Bits<T, align, blocksize> const*>(ptr); }
 
   protected:
-    // Needs to access ptr().
-    template<typename BASE, typename POLICY_MUTEX> friend class UnlockedBase;
-
     // Accessors.
-    T const* ptr() const { return static_cast<T const*>(std::addressof(m_storage)); }
+    T const* ptr() const { return reinterpret_cast<T const*>(std::addressof(m_storage)); }
     T* ptr() { return reinterpret_cast<T*>(std::addressof(m_storage)); }
 };
+
+template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+class Unlocked;
+
+template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+requires std::derived_from<T, AIRefCount>
+void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr);
+
+template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+requires std::derived_from<T, AIRefCount>
+void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr);
 
 /**
  * @brief A wrapper class for objects that need to be accessed by more than one thread, allowing concurrent readers.
@@ -375,6 +380,17 @@ class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUT
     friend wat;
     friend w2rCarry;
 
+    // Needs to access ptr() (and m_ref).
+    template<typename BASE, typename PM> friend class UnlockedBase;
+
+    template<typename T2, typename POLICY_MUTEX2, size_t align2, size_t blocksize2>
+    requires std::derived_from<T2, AIRefCount>
+    friend void intrusive_ptr_add_ref(Unlocked<T2, POLICY_MUTEX2, align2, blocksize2> const* ptr);
+
+    template<typename T2, typename POLICY_MUTEX2, size_t align2, size_t blocksize2>
+    requires std::derived_from<T2, AIRefCount>
+    friend void intrusive_ptr_release(Unlocked<T2, POLICY_MUTEX2, align2, blocksize2> const* ptr);
+
   public:
     // Allow arbitrary parameters to be passed for construction.
     template<typename... ARGS>
@@ -404,6 +420,17 @@ class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUT
     }
 #endif
 };
+
+template<typename BASE, typename POLICY_MUTEX>
+class UnlockedBase;
+
+template<typename BASE, typename POLICY_MUTEX>
+requires std::derived_from<BASE, AIRefCount>
+void intrusive_ptr_add_ref(UnlockedBase<BASE, POLICY_MUTEX> const* ptr);
+
+template<typename BASE, typename POLICY_MUTEX>
+requires std::derived_from<BASE, AIRefCount>
+void intrusive_ptr_release(UnlockedBase<BASE, POLICY_MUTEX> const* ptr);
 
 /**
  * @brief A class that can be used to point to a base class of an object wrapped by Unlocked.
@@ -441,7 +468,8 @@ class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUT
  * base class pointer.
  */
 template<typename BASE, typename POLICY_MUTEX>
-class UnlockedBase : POLICY_MUTEX::reference_type {
+class UnlockedBase : POLICY_MUTEX::reference_type
+{
   public:
     using data_type = BASE;
     using policy_type = typename POLICY_MUTEX::reference_type;
@@ -457,6 +485,15 @@ class UnlockedBase : POLICY_MUTEX::reference_type {
     friend rat;
     friend wat;
     friend w2rCarry;
+
+    // These need access to ptr().
+    template<typename BASE2, typename POLICY_MUTEX2>
+    requires std::derived_from<BASE2, AIRefCount>
+    friend void intrusive_ptr_add_ref(UnlockedBase<BASE2, POLICY_MUTEX2> const* ptr);
+
+    template<typename BASE2, typename POLICY_MUTEX2>
+    requires std::derived_from<BASE2, AIRefCount>
+    friend void intrusive_ptr_release(UnlockedBase<BASE2, POLICY_MUTEX2> const* ptr);
 
   public:
     template<typename T>
@@ -1021,4 +1058,35 @@ class OneThread : public OneThreadAccess
 };
 
 } // namespace policy
+
+template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+requires std::derived_from<T, AIRefCount>
+void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr)
+{
+  intrusive_ptr_add_ref(ptr->ptr());
+}
+
+template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+requires std::derived_from<T, AIRefCount>
+void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr)
+{
+  if (ptr->ptr()->allow_deletion(true) == 1)
+    delete ptr;
+}
+
+template<typename BASE, typename POLICY_MUTEX>
+requires std::derived_from<BASE, AIRefCount>
+void intrusive_ptr_add_ref(UnlockedBase<BASE, POLICY_MUTEX> const* ptr)
+{
+  intrusive_ptr_add_ref(ptr->ptr());
+}
+
+template<typename BASE, typename POLICY_MUTEX>
+requires std::derived_from<BASE, AIRefCount>
+void intrusive_ptr_release(UnlockedBase<BASE, POLICY_MUTEX> const* ptr)
+{
+  // Destroy all UnlockedBase before destroying or resetting the last associated boost::intrusive_ptr<Unlocked>.
+  ASSERT(ptr->ptr()->allow_deletion(true) > 1);
+}
+
 } // namespace threadsafe
