@@ -3,11 +3,12 @@
 This repository is a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules)
 providing C++ utilities for larger projects, including:
 
-* <tt>threadsafe::Wrapper&lt;T, policy::P&gt;</tt> : template class to construct a T / mutex pair with locking policy P.
+* <tt>threadsafe::Unlocked&lt;T, policy::P&gt;</tt> : template class to construct a T / mutex pair with locking policy P.
 * <tt>ReadWrite</tt>, <tt>Primitive</tt>, <tt>OneThread</tt> : Locking policies.
 * <tt>AccessConst</tt> and <tt>Access</tt> : Obtain read/write access to Primitive or OneThread locked objects.
 * <tt>ConstReadAccess</tt>, <tt>ReadAccess</tt> and <tt>WriteAccess</tt> : Obtain access to ReadWrite protected objects.
 * <tt>AIReadWriteMutex</tt> : A mutex class that provides read/write locking.
+* <tt>UnlockedBase</tt> : A base class pointer to an Unlocked object that can be used in the same way.
 * Several utilities like <tt>is_single_threaded</tt>.
 
 The root project should be using
@@ -22,7 +23,7 @@ that has read/write protection, one could do:
 
 ```C++
 using namespace threadsafe;
-using foo_t = Wrapper<Foo, policy::ReadWrite<AIReadWriteMutex>>;
+using foo_t = Unlocked<Foo, policy::ReadWrite<AIReadWriteMutex>>;
 
 // Create an object Foo, AIReadWriteMutex pair. Foo will be inaccessible.
 foo_t foo;

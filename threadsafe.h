@@ -144,6 +144,9 @@
 namespace threadsafe
 {
 
+template<typename BASE, typename POLICY_MUTEX>
+class UnlockedBase;
+
 template<typename T, size_t align = alignof(T), size_t blocksize = align>
 class Bits
 {
@@ -166,7 +169,7 @@ class Bits
     ~Bits() { ptr()->~T(); }
 
     // Only for use by AITHREADSAFE, see below.
-    void* storage() const { return std::addressof(m_storage); }
+    void* storage() { return std::addressof(m_storage); }
 
     // Cast a T* back to Bits<T, align, blocksize>. This is the inverse of storage().
     // This assumes that addressof(m_storage) == this, in storage().
@@ -174,6 +177,9 @@ class Bits
     static Bits<T, align, blocksize> const* unlocked_cast(T const* ptr) { return reinterpret_cast<Bits<T, align, blocksize> const*>(ptr); }
 
   protected:
+    // Needs to access ptr().
+    template<typename BASE, typename POLICY_MUTEX> friend class UnlockedBase;
+
     // Accessors.
     T const* ptr() const { return static_cast<T const*>(std::addressof(m_storage)); }
     T* ptr() { return reinterpret_cast<T*>(std::addressof(m_storage)); }
@@ -396,6 +402,92 @@ class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUT
       // main()?
       assert(m_ref == 0);
     }
+#endif
+};
+
+/**
+ * @brief A class that can be used to point to a base class of an object wrapped by Unlocked.
+ *
+ * Example usage:
+ *
+ * <code>
+ * class B { public: void modify(); void print() const; };
+ * class A : public B { ... };
+ *
+ * using UnlockedA = Unlocked<A, policy::ReadWrite<AIReadWriteMutex>>;
+ * using UnlockedB = UnlockedBase<B, UnlockedA::policy_type>;
+ * </code>
+ *
+ * Now UnlockedB can be created from an UnlockedA and then used in the usual way:
+ *
+ * <code>
+ * void f(UnlockedB b)
+ * {
+ *   {
+ *     UnlockedB::wat b_w(b);    // Get write-access.
+ *     b_w->modify();
+ *   }
+ *   {
+ *     UnlockedB::rat b_r(b);    // Get read-access.
+ *     b_r->print();
+ *   }
+ * }
+ * </code>
+ *
+ * Note that an UnlockedBase is a pointer/reference to the Unlocked that it was created from:
+ * you may not move or destroy the Unlocked that it was created from!
+ *
+ * Moving and copying an UnlockedBase is prefectly fine; just like it would be to move/copy a
+ * base class pointer.
+ */
+template<typename BASE, typename POLICY_MUTEX>
+class UnlockedBase : POLICY_MUTEX::reference_type {
+  public:
+    using data_type = BASE;
+    using policy_type = typename POLICY_MUTEX::reference_type;
+
+    // The access types.
+    using crat = typename policy_type::template access_types<UnlockedBase<BASE, POLICY_MUTEX>>::const_read_access_type;
+    using rat = typename policy_type::template access_types<UnlockedBase<BASE, POLICY_MUTEX>>::read_access_type;
+    using wat = typename policy_type::template access_types<UnlockedBase<BASE, POLICY_MUTEX>>::write_access_type;
+    using w2rCarry = typename policy_type::template access_types<UnlockedBase<BASE, POLICY_MUTEX>>::write_to_read_carry;
+
+    // Only these may access the object (through ptr()).
+    friend crat;
+    friend rat;
+    friend wat;
+    friend w2rCarry;
+
+  public:
+    template<typename T>
+    requires std::derived_from<T, BASE>
+    UnlockedBase(Unlocked<T, POLICY_MUTEX>& unlocked) : POLICY_MUTEX::reference_type(unlocked.mutex()), m_base(unlocked.ptr())
+#if THREADSAFE_DEBUG
+      , m_ref(unlocked.m_ref)
+#endif // THREADSAFE_DEBUG
+    {
+    }
+
+    template<typename T>
+    requires std::derived_from<T, BASE>
+    UnlockedBase(UnlockedBase<T, POLICY_MUTEX>& unlocked_base) : POLICY_MUTEX::reference_type(unlocked_base.mutex()), m_base(unlocked_base.ptr())
+#if THREADSAFE_DEBUG
+      , m_ref(unlocked_base.m_ref)
+#endif // THREADSAFE_DEBUG
+    {
+    }
+
+  private:
+    BASE* m_base;
+
+  protected:
+    // Accessors.
+    BASE const* ptr() const { return m_base; }
+    BASE* ptr() { return m_base; }
+
+#if THREADSAFE_DEBUG
+  private:
+    std::atomic<int>& m_ref;
 #endif
 };
 
@@ -790,14 +882,36 @@ class ReadWriteAccess
 };
 
 template<class RWMUTEX>
-class ReadWrite : public ReadWriteAccess<RWMUTEX>
+class ReadWriteRef : public ReadWriteAccess<RWMUTEX>
 {
   protected:
     template<class UNLOCKED> friend struct ConstReadAccess;
     template<class UNLOCKED> friend struct ReadAccess;
     template<class UNLOCKED> friend struct WriteAccess;
+    template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
+
+    RWMUTEX& m_read_write_mutex;
+
+    RWMUTEX& mutex() { return m_read_write_mutex; }
+
+    ReadWriteRef(RWMUTEX& read_write_mutex) : m_read_write_mutex(read_write_mutex) { }
+};
+
+template<class RWMUTEX>
+class ReadWrite : public ReadWriteAccess<RWMUTEX>
+{
+  public:
+    using reference_type = ReadWriteRef<RWMUTEX>;
+
+  protected:
+    template<class UNLOCKED> friend struct ConstReadAccess;
+    template<class UNLOCKED> friend struct ReadAccess;
+    template<class UNLOCKED> friend struct WriteAccess;
+    template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
     RWMUTEX m_read_write_mutex;
+
+    RWMUTEX& mutex() { return m_read_write_mutex; }
 
   public:
     void rd2wryield() { m_read_write_mutex.rd2wryield(); }
@@ -818,13 +932,34 @@ class PrimitiveAccess
 };
 
 template<class MUTEX>
-class Primitive : public PrimitiveAccess<MUTEX>
+class PrimitiveRef : public PrimitiveAccess<MUTEX>
 {
   protected:
     template<class UNLOCKED> friend struct AccessConst;
     template<class UNLOCKED> friend struct Access;
+    template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
+
+    MUTEX& m_primitive_mutex;
+
+    PrimitiveRef(MUTEX& primitive_mutex) : m_primitive_mutex(primitive_mutex) { }
+
+    MUTEX& mutex() { return m_primitive_mutex; }
+};
+
+template<class MUTEX>
+class Primitive : public PrimitiveAccess<MUTEX>
+{
+  public:
+    using reference_type = PrimitiveRef<MUTEX>;
+
+  protected:
+    template<class UNLOCKED> friend struct AccessConst;
+    template<class UNLOCKED> friend struct Access;
+    template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
     MUTEX m_primitive_mutex;
+
+    MUTEX& mutex() { return m_primitive_mutex; }
 };
 
 class OneThreadAccess
@@ -840,12 +975,48 @@ class OneThreadAccess
     };
 };
 
-class OneThread : public OneThreadAccess
+class OneThreadRef : public OneThreadAccess
 {
   protected:
+    OneThreadRef(
+#if THREADSAFE_DEBUG
+        std::thread::id& thread_id
+#else
+        int
+#endif
+        )
+#if THREADSAFE_DEBUG
+      : m_thread_id(thread_id)
+#endif
+    { }
+
+    template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
+
+#if THREADSAFE_DEBUG
+    std::thread::id& m_thread_id;
+
+    // Hijack mutex() to pass the reference to m_thread_id %-).
+    std::thread::id& mutex() { return m_thread_id; }
+#else
+    int mutex() { return {}; }
+#endif // THREADSAFE_DEBUG
+};
+
+class OneThread : public OneThreadAccess
+{
+  public:
+    using reference_type = OneThreadRef;
+
+  protected:
+    template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
 #if THREADSAFE_DEBUG
     mutable std::thread::id m_thread_id;
+
+    // Hijack mutex() to pass the reference to m_thread_id %-).
+    std::thread::id& mutex() { return m_thread_id; }
+#else
+    int mutex() { return {}; }
 #endif // THREADSAFE_DEBUG
 };
 
