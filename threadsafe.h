@@ -59,6 +59,10 @@
  *   - Renamed aithreadsafe.h to threadsafe.h.
  *   - Renamed Wrapper to Unlocked.
  *   - Renamed wrapper_cast to unlocked_cast.
+ *
+ *   2023/06/12
+ *   - Unlocked no longer takes align and blocksize as template arguments.
+ *   - Unlocked is now derived from protected from T instead of obscuring with Bits.
  */
 
 // This file defines a wrapper template class for arbitrary types T
@@ -150,51 +154,16 @@
 
 namespace threadsafe {
 
-template<typename T, size_t align = alignof(T), size_t blocksize = align>
-class Bits
-{
-  public:
-    enum { size = ((sizeof(T) + blocksize - 1) / blocksize) * blocksize,	// sizeof(T) rounded up to multiple of blocksize.
-           alignment = boost::integer::static_lcm<align, alignof(T)>::value };	// Properly aligned for T and aligned to 'align'.
-
-  private:
-    // Unlocked (and Bits) is a wrapper around an instance of T.
-    // Because T might not have a default constructor, it is constructed
-    // 'in place', with placement new, in the storage reserved here.
-    //
-    // Properly aligned uninitialized storage for T.
-    typename std::aligned_storage<size, alignment>::type m_storage;
-
-  public:
-    // The wrapped objects are constructed in-place with placement new *outside*
-    // of this object (by AITHREADSAFE macro(s) or derived classes).
-    // However, we are responsible for the destruction of the wrapped object.
-    ~Bits() { ptr()->~T(); }
-
-    // Only for use by AITHREADSAFE, see below.
-    void* storage() { return std::addressof(m_storage); }
-
-    // Cast a T* back to Bits<T, align, blocksize>. This is the inverse of storage().
-    // This assumes that addressof(m_storage) == this, in storage().
-    static Bits<T, align, blocksize>* unlocked_cast(T* ptr) { return reinterpret_cast<Bits<T, align, blocksize>*>(ptr); }
-    static Bits<T, align, blocksize> const* unlocked_cast(T const* ptr) { return reinterpret_cast<Bits<T, align, blocksize> const*>(ptr); }
-
-  protected:
-    // Accessors.
-    T const* ptr() const { return reinterpret_cast<T const*>(std::addressof(m_storage)); }
-    T* ptr() { return reinterpret_cast<T*>(std::addressof(m_storage)); }
-};
-
-template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+template<typename T, typename POLICY_MUTEX>
 class Unlocked;
 
-template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+template<typename T, typename POLICY_MUTEX>
 requires std::derived_from<T, AIRefCount>
-void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr);
+void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX> const* ptr);
 
-template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+template<typename T, typename POLICY_MUTEX>
 requires std::derived_from<T, AIRefCount>
-void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr);
+void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX> const* ptr);
 
 /**
  * @brief A wrapper class for objects that need to be accessed by more than one thread, allowing concurrent readers.
@@ -368,23 +337,23 @@ void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX, align, blocksize> const* pt
  * block approach.
  */
 #if THREADSAFE_TRACK_UNLOCKED
-template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+template<typename T, typename POLICY_MUTEX>
 struct NameUnlocked {
   static char const* name;
 };
-template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
-char const* NameUnlocked<T, POLICY_MUTEX, align, blocksize>::name =
-  libcwd::type_info_of<Unlocked<T, POLICY_MUTEX, align, blocksize>>().demangled_name();
+template<typename T, typename POLICY_MUTEX>
+char const* NameUnlocked<T, POLICY_MUTEX>::name =
+  libcwd::type_info_of<Unlocked<T, POLICY_MUTEX>>().demangled_name();
 #endif
-template<typename T, typename POLICY_MUTEX, size_t align = alignof(T), size_t blocksize = align>
-class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUTEX
+template<typename T, typename POLICY_MUTEX>
+class Unlocked : protected T, public POLICY_MUTEX
 #if THREADSAFE_TRACK_UNLOCKED
-                 , public tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX, align, blocksize>::name>
+                 , public tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX>::name>
 #endif
 {
   public:
 #if THREADSAFE_TRACK_UNLOCKED
-    using tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX, align, blocksize>::name>::Tracked;
+    using tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX>::name>::Tracked;
 #endif
 
     using data_type = T;
@@ -396,33 +365,35 @@ class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUT
     using wat = typename POLICY_MUTEX::template access_types<Unlocked<T, POLICY_MUTEX>>::write_access_type;
     using w2rCarry = typename POLICY_MUTEX::template access_types<Unlocked<T, POLICY_MUTEX>>::write_to_read_carry;
 
-    // Only these may access the object (through ptr()).
+    // Only these may access the protected object T.
     friend crat;
     friend rat;
     friend wat;
     friend w2rCarry;
 
-    // Needs to access ptr() (and m_ref).
+    // Needs to access to T (and m_ref).
     template<typename BASE, typename PM> friend class UnlockedBase;
 
-    template<typename T2, typename POLICY_MUTEX2, size_t align2, size_t blocksize2>
+    template<typename T2, typename POLICY_MUTEX2>
     requires std::derived_from<T2, AIRefCount>
-    friend void intrusive_ptr_add_ref(Unlocked<T2, POLICY_MUTEX2, align2, blocksize2> const* ptr);
+    friend void intrusive_ptr_add_ref(Unlocked<T2, POLICY_MUTEX2> const* ptr);
 
-    template<typename T2, typename POLICY_MUTEX2, size_t align2, size_t blocksize2>
+    template<typename T2, typename POLICY_MUTEX2>
     requires std::derived_from<T2, AIRefCount>
-    friend void intrusive_ptr_release(Unlocked<T2, POLICY_MUTEX2, align2, blocksize2> const* ptr);
+    friend void intrusive_ptr_release(Unlocked<T2, POLICY_MUTEX2> const* ptr);
 
   public:
     // Allow arbitrary parameters to be passed for construction.
     template<typename... ARGS>
-    Unlocked(ARGS&&... args)
+    Unlocked(ARGS&&... args) : T(std::forward<ARGS>(args)...)
 #if THREADSAFE_DEBUG
-      : m_ref(0)
+      , m_ref(0)
 #endif // THREADSAFE_DEBUG
     {
-      new (threadsafe::Bits<T, align, blocksize>::ptr()) T(std::forward<ARGS>(args)...);
     }
+
+    T const* ptr() const { return this; }
+    T* ptr() { return this; }
 
 #if THREADSAFE_DEBUG
   private:
@@ -516,12 +487,12 @@ class UnlockedBase : POLICY_MUTEX::reference_type
   public:
     template<typename T>
     requires std::derived_from<T, BASE>
-    UnlockedBase(Unlocked<T, POLICY_MUTEX>& unlocked) : POLICY_MUTEX::reference_type(unlocked.mutex()), m_base(unlocked.ptr())
+    UnlockedBase(Unlocked<T, POLICY_MUTEX>& unlocked) : POLICY_MUTEX::reference_type(unlocked.mutex()), m_base(&unlocked)
 #if THREADSAFE_DEBUG
       , m_ref(unlocked.m_ref)
 #endif // THREADSAFE_DEBUG
     {
-      if constexpr (std::derived_from<AIRefCount, BASE>)
+      if constexpr (std::derived_from<BASE, AIRefCount>)
       {
         // Stop a destruction of a boost::intrusive_ptr that points to unlocked from destroying it.
         m_base->inhibit_deletion();
@@ -539,18 +510,14 @@ class UnlockedBase : POLICY_MUTEX::reference_type
       , m_ref(unlocked_base.m_ref)
 #endif // THREADSAFE_DEBUG
     {
-      if constexpr (std::derived_from<AIRefCount, BASE>)
+      if constexpr (std::derived_from<BASE, AIRefCount>)
         m_base->inhibit_deletion();
     }
 
     ~UnlockedBase()
     {
-      if constexpr (std::derived_from<AIRefCount, BASE>)
-      {
-        // Destroy all UnlockedBase before destroying or resetting the last associated boost::intrusive_ptr<Unlocked>.
-        // This is necessary because we don't have a pointer to the Unlocked<> here and therefore can't delete it!
-        ASSERT(m_base->allow_deletion(true) > 1);
-      }
+      if constexpr (std::derived_from<BASE, AIRefCount>)
+        m_base->allow_deletion();
     }
 
   private:
@@ -748,7 +715,7 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
     typename UNLOCKED::data_type* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for (read and) write access.
-    typename UNLOCKED::data_type& operator*() const { return *this->m_unlocked->ptr(); }
+    typename UNLOCKED::data_type& operator*() const { return *this->m_unlocked->ptr; }
 };
 
 /**
@@ -1098,21 +1065,18 @@ class OneThread : public OneThreadAccess
 
 } // namespace policy
 
-template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+template<typename T, typename POLICY_MUTEX>
 requires std::derived_from<T, AIRefCount>
-void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr)
+void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX> const* ptr)
 {
-  // Pass false because this is not really an inhibit_deletion, it is already
-  // the increment of the reference count because we're being added to a boost::intrusive_ptr.
-  ptr->ptr()->inhibit_deletion(false);
+  intrusive_ptr_add_ref(static_cast<T const*>(ptr));
 }
 
-template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+template<typename T, typename POLICY_MUTEX>
 requires std::derived_from<T, AIRefCount>
-void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr)
+void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX> const* ptr)
 {
-  if (ptr->ptr()->allow_deletion(true) == 1)
-    delete ptr;
+  intrusive_ptr_release(static_cast<T const*>(ptr));
 }
 
 } // namespace threadsafe
