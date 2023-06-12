@@ -137,6 +137,12 @@
 #include <boost/integer/common_factor.hpp>
 
 #ifdef CWDEBUG
+// Set this to 1 to print tracking information about Unlocked and UnlockedBase to dc::tracked.
+#define THREADSAFE_TRACK_UNLOCKED 0
+#if THREADSAFE_TRACK_UNLOCKED
+#include <cwds/tracked.h>
+#include <libcwd/type_info.h>
+#endif
 #define THREADSAFE_DEBUG 1
 #else
 #define THREADSAFE_DEBUG 0
@@ -361,10 +367,26 @@ void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX, align, blocksize> const* pt
  * throw anyway: if that is needed then just use the try / catch
  * block approach.
  */
+#if THREADSAFE_TRACK_UNLOCKED
+template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+struct NameUnlocked {
+  static char const* name;
+};
+template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
+char const* NameUnlocked<T, POLICY_MUTEX, align, blocksize>::name =
+  libcwd::type_info_of<Unlocked<T, POLICY_MUTEX, align, blocksize>>().demangled_name();
+#endif
 template<typename T, typename POLICY_MUTEX, size_t align = alignof(T), size_t blocksize = align>
 class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUTEX
+#if THREADSAFE_TRACK_UNLOCKED
+                 , public tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX, align, blocksize>::name>
+#endif
 {
   public:
+#if THREADSAFE_TRACK_UNLOCKED
+    using tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX, align, blocksize>::name>::Tracked;
+#endif
+
     using data_type = T;
     using policy_type = POLICY_MUTEX;
 
@@ -421,17 +443,6 @@ class Unlocked : public threadsafe::Bits<T, align, blocksize>, public POLICY_MUT
 #endif
 };
 
-template<typename BASE, typename POLICY_MUTEX>
-class UnlockedBase;
-
-template<typename BASE, typename POLICY_MUTEX>
-requires std::derived_from<BASE, AIRefCount>
-void intrusive_ptr_add_ref(UnlockedBase<BASE, POLICY_MUTEX> const* ptr);
-
-template<typename BASE, typename POLICY_MUTEX>
-requires std::derived_from<BASE, AIRefCount>
-void intrusive_ptr_release(UnlockedBase<BASE, POLICY_MUTEX> const* ptr);
-
 /**
  * @brief A class that can be used to point to a base class of an object wrapped by Unlocked.
  *
@@ -467,10 +478,26 @@ void intrusive_ptr_release(UnlockedBase<BASE, POLICY_MUTEX> const* ptr);
  * Moving and copying an UnlockedBase is prefectly fine; just like it would be to move/copy a
  * base class pointer.
  */
+#if THREADSAFE_TRACK_UNLOCKED
+template<typename BASE, typename POLICY_MUTEX>
+class UnlockedBase;
+template<typename BASE, typename POLICY_MUTEX>
+struct NameUnlockedBase {
+  static char const* name;
+};
+template<typename BASE, typename POLICY_MUTEX>
+char const* NameUnlockedBase<BASE, POLICY_MUTEX>::name = libcwd::type_info_of<UnlockedBase<BASE, POLICY_MUTEX>>().demangled_name();
+#endif
 template<typename BASE, typename POLICY_MUTEX>
 class UnlockedBase : POLICY_MUTEX::reference_type
+#if THREADSAFE_TRACK_UNLOCKED
+                 , public tracked::Tracked<&NameUnlockedBase<BASE, POLICY_MUTEX>::name>
+#endif
 {
   public:
+#if THREADSAFE_TRACK_UNLOCKED
+    using tracked::Tracked<&NameUnlockedBase<BASE, POLICY_MUTEX>::name>::Tracked;
+#endif
     using data_type = BASE;
     using policy_type = typename POLICY_MUTEX::reference_type;
 
@@ -486,15 +513,6 @@ class UnlockedBase : POLICY_MUTEX::reference_type
     friend wat;
     friend w2rCarry;
 
-    // These need access to ptr().
-    template<typename BASE2, typename POLICY_MUTEX2>
-    requires std::derived_from<BASE2, AIRefCount>
-    friend void intrusive_ptr_add_ref(UnlockedBase<BASE2, POLICY_MUTEX2> const* ptr);
-
-    template<typename BASE2, typename POLICY_MUTEX2>
-    requires std::derived_from<BASE2, AIRefCount>
-    friend void intrusive_ptr_release(UnlockedBase<BASE2, POLICY_MUTEX2> const* ptr);
-
   public:
     template<typename T>
     requires std::derived_from<T, BASE>
@@ -503,15 +521,36 @@ class UnlockedBase : POLICY_MUTEX::reference_type
       , m_ref(unlocked.m_ref)
 #endif // THREADSAFE_DEBUG
     {
+      if constexpr (std::derived_from<AIRefCount, BASE>)
+      {
+        // Stop a destruction of a boost::intrusive_ptr that points to unlocked from destroying it.
+        m_base->inhibit_deletion();
+      }
     }
 
     template<typename T>
     requires std::derived_from<T, BASE>
-    UnlockedBase(UnlockedBase<T, POLICY_MUTEX>& unlocked_base) : POLICY_MUTEX::reference_type(unlocked_base.mutex()), m_base(unlocked_base.ptr())
+    UnlockedBase(UnlockedBase<T, POLICY_MUTEX>& unlocked_base) : POLICY_MUTEX::reference_type(unlocked_base.mutex()),
+#if THREADSAFE_TRACK_UNLOCKED
+        tracked::Tracked<&NameUnlockedBase<BASE, POLICY_MUTEX>::name>(unlocked_base),
+#endif
+        m_base(unlocked_base.ptr())
 #if THREADSAFE_DEBUG
       , m_ref(unlocked_base.m_ref)
 #endif // THREADSAFE_DEBUG
     {
+      if constexpr (std::derived_from<AIRefCount, BASE>)
+        m_base->inhibit_deletion();
+    }
+
+    ~UnlockedBase()
+    {
+      if constexpr (std::derived_from<AIRefCount, BASE>)
+      {
+        // Destroy all UnlockedBase before destroying or resetting the last associated boost::intrusive_ptr<Unlocked>.
+        // This is necessary because we don't have a pointer to the Unlocked<> here and therefore can't delete it!
+        ASSERT(m_base->allow_deletion(true) > 1);
+      }
     }
 
   private:
@@ -1063,7 +1102,9 @@ template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
 requires std::derived_from<T, AIRefCount>
 void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX, align, blocksize> const* ptr)
 {
-  intrusive_ptr_add_ref(ptr->ptr());
+  // Pass false because this is not really an inhibit_deletion, it is already
+  // the increment of the reference count because we're being added to a boost::intrusive_ptr.
+  ptr->ptr()->inhibit_deletion(false);
 }
 
 template<typename T, typename POLICY_MUTEX, size_t align, size_t blocksize>
@@ -1072,21 +1113,6 @@ void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX, align, blocksize> const* pt
 {
   if (ptr->ptr()->allow_deletion(true) == 1)
     delete ptr;
-}
-
-template<typename BASE, typename POLICY_MUTEX>
-requires std::derived_from<BASE, AIRefCount>
-void intrusive_ptr_add_ref(UnlockedBase<BASE, POLICY_MUTEX> const* ptr)
-{
-  intrusive_ptr_add_ref(ptr->ptr());
-}
-
-template<typename BASE, typename POLICY_MUTEX>
-requires std::derived_from<BASE, AIRefCount>
-void intrusive_ptr_release(UnlockedBase<BASE, POLICY_MUTEX> const* ptr)
-{
-  // Destroy all UnlockedBase before destroying or resetting the last associated boost::intrusive_ptr<Unlocked>.
-  ASSERT(ptr->ptr()->allow_deletion(true) > 1);
 }
 
 } // namespace threadsafe
