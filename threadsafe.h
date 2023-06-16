@@ -129,6 +129,7 @@
 
 #include "utils/threading/aithreadid.h"
 #include "utils/AIRefCount.h"
+#include "utils/is_specialization_of.h"
 
 #include <new>
 #include <cstddef>
@@ -142,7 +143,7 @@
 
 #ifdef CWDEBUG
 // Set this to 1 to print tracking information about Unlocked and UnlockedBase to dc::tracked.
-#define THREADSAFE_TRACK_UNLOCKED 0
+#define THREADSAFE_TRACK_UNLOCKED 1
 #if THREADSAFE_TRACK_UNLOCKED
 #include <cwds/tracked.h>
 #include <libcwd/type_info.h>
@@ -346,7 +347,7 @@ char const* NameUnlocked<T, POLICY_MUTEX>::name =
   libcwd::type_info_of<Unlocked<T, POLICY_MUTEX>>().demangled_name();
 #endif
 template<typename T, typename POLICY_MUTEX>
-class Unlocked : protected T, public POLICY_MUTEX
+class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS PROTECTED T */ protected T, public POLICY_MUTEX
 #if THREADSAFE_TRACK_UNLOCKED
                  , public tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX>::name>
 #endif
@@ -398,6 +399,9 @@ class Unlocked : protected T, public POLICY_MUTEX
 #if THREADSAFE_DEBUG
   private:
     std::atomic<int> m_ref;
+
+    void increment_ref() { m_ref++; }
+    void decrement_ref() { m_ref--; }
 
   public:
     ~Unlocked()
@@ -489,7 +493,7 @@ class UnlockedBase : POLICY_MUTEX::reference_type
     requires std::derived_from<T, BASE>
     UnlockedBase(Unlocked<T, POLICY_MUTEX>& unlocked) : POLICY_MUTEX::reference_type(unlocked.mutex()), m_base(&unlocked)
 #if THREADSAFE_DEBUG
-      , m_ref(unlocked.m_ref)
+      , m_ref_ptr(&unlocked.m_ref)
 #endif // THREADSAFE_DEBUG
     {
       if constexpr (std::derived_from<BASE, AIRefCount>)
@@ -507,7 +511,7 @@ class UnlockedBase : POLICY_MUTEX::reference_type
 #endif
         m_base(unlocked_base.ptr())
 #if THREADSAFE_DEBUG
-      , m_ref(unlocked_base.m_ref)
+      , m_ref_ptr(unlocked_base.m_ref_ptr)
 #endif // THREADSAFE_DEBUG
     {
       if constexpr (std::derived_from<BASE, AIRefCount>)
@@ -520,6 +524,81 @@ class UnlockedBase : POLICY_MUTEX::reference_type
         m_base->allow_deletion();
     }
 
+    UnlockedBase(UnlockedBase const& unlocked_base) : POLICY_MUTEX::reference_type(const_cast<UnlockedBase&>(unlocked_base).mutex()),
+#if THREADSAFE_TRACK_UNLOCKED
+        tracked::Tracked<&NameUnlockedBase<BASE, POLICY_MUTEX>::name>(unlocked_base),
+#endif
+        m_base(const_cast<UnlockedBase&>(unlocked_base).ptr())
+#if THREADSAFE_DEBUG
+      , m_ref_ptr(unlocked_base.m_ref_ptr)
+#endif // THREADSAFE_DEBUG
+    {
+      // Copying is like a const_cast...
+      ASSERT(false);
+    }
+    UnlockedBase& operator=(UnlockedBase const& orig)
+    {
+      ASSERT(false);
+      return *this;
+    }
+
+    UnlockedBase(UnlockedBase&& orig) = default;
+    UnlockedBase& operator=(UnlockedBase&& orig) = default;
+
+  private:
+    // Used by unlocked_cast.
+    template<typename T>
+    requires std::derived_from<BASE, T> && (!std::is_same_v<BASE, T>)
+    UnlockedBase(UnlockedBase<T, POLICY_MUTEX>& unlocked_base) : POLICY_MUTEX::reference_type(unlocked_base.mutex()),
+#if THREADSAFE_TRACK_UNLOCKED
+        tracked::Tracked<&NameUnlockedBase<BASE, POLICY_MUTEX>::name>(unlocked_base),
+#endif
+        m_base(static_cast<BASE*>(unlocked_base.ptr()))
+#if THREADSAFE_DEBUG
+      , m_ref_ptr(unlocked_base.m_ref_ptr)
+#endif // THREADSAFE_DEBUG
+    {
+      if constexpr (std::derived_from<BASE, AIRefCount>)
+        m_base->inhibit_deletion();
+    }
+
+  public:
+    template<typename U>
+    requires std::is_reference_v<U> && std::is_const_v<std::remove_reference_t<U>> &&
+             utils::is_specialization_of_v<std::remove_cvref_t<U>, Unlocked> &&
+             std::derived_from<typename std::remove_cvref<U>::type::data_type, BASE>
+    friend U unlocked_cast(UnlockedBase const& orig)
+    {
+      return static_cast<U>(*orig.m_base);
+    }
+
+    template<typename U>
+    requires std::is_reference_v<U> && (!std::is_const_v<std::remove_reference_t<U>>) &&
+             utils::is_specialization_of_v<std::remove_cvref_t<U>, Unlocked> &&
+             std::derived_from<typename std::remove_cvref<U>::type::data_type, BASE>
+    friend U unlocked_cast(UnlockedBase& orig)
+    {
+      return static_cast<U>(*orig.m_base);
+    }
+
+    template<typename U>
+    requires std::is_reference_v<U> && std::is_const_v<std::remove_reference_t<U>> &&
+             utils::is_specialization_of_v<std::remove_cvref_t<U>, UnlockedBase> &&
+             std::derived_from<typename std::remove_cvref<U>::type::data_type, BASE>
+    friend U unlocked_cast(UnlockedBase const& orig)
+    {
+      return {orig};
+    }
+
+    template<typename U>
+    requires std::is_reference_v<U> && (!std::is_const_v<std::remove_reference_t<U>>) &&
+             utils::is_specialization_of_v<std::remove_cvref_t<U>, UnlockedBase> &&
+             std::derived_from<typename std::remove_cvref<U>::type::data_type, BASE>
+    friend U unlocked_cast(UnlockedBase& orig)
+    {
+      return {orig};
+    }
+
   private:
     BASE* m_base;
 
@@ -530,7 +609,10 @@ class UnlockedBase : POLICY_MUTEX::reference_type
 
 #if THREADSAFE_DEBUG
   private:
-    std::atomic<int>& m_ref;
+    std::atomic<int>* m_ref_ptr;
+
+    void increment_ref() { (*m_ref_ptr)++; }
+    void decrement_ref() { (*m_ref_ptr)--; }
 #endif
 };
 
@@ -541,6 +623,8 @@ template<class UNLOCKED>
 struct ConstReadAccess
 {
   public:
+    using unlocked_type = UNLOCKED;
+
     /// Internal enum for the lock-type of the Access object.
     enum state_type
     {
@@ -593,7 +677,7 @@ struct ConstReadAccess
 #endif // THREADSAFE_DEBUG
     }
 
-    UNLOCKED* m_unlocked;         ///< Pointer to the object that we provide access to.
+    UNLOCKED* m_unlocked;       ///< Pointer to the object that we provide access to.
     state_type const m_state;   ///< The lock state that m_unlocked is in.
 
     // Disallow copy constructing directly.
@@ -724,14 +808,16 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
 template<class UNLOCKED>
 struct AccessConst
 {
+    using unlocked_type = UNLOCKED;
+
     /// Construct a AccessConst from a constant Unlocked.
     template<typename ...Args>
     AccessConst(UNLOCKED const& unlocked, Args&&... args) : m_unlocked(const_cast<UNLOCKED*>(&unlocked))
     {
 #if THREADSAFE_DEBUG
-      m_unlocked->m_ref++;
+      m_unlocked->increment_ref();
 #endif // THREADSAFE_DEBUG
-      this->m_unlocked->m_primitive_mutex.lock(std::forward<Args>(args)...);
+      this->m_unlocked->mutex().lock(std::forward<Args>(args)...);
     }
 
     /// Access the underlaying object for (read and) write access.
@@ -745,25 +831,25 @@ struct AccessConst
       if (AI_LIKELY(this->m_unlocked))
       {
 #if THREADSAFE_DEBUG
-        this->m_unlocked->m_ref--;
+        this->m_unlocked->decrement_ref();
 #endif // THREADSAFE_DEBUG
-        this->m_unlocked->m_primitive_mutex.unlock();
+        this->m_unlocked->mutex().unlock();
       }
     }
 
     // If m_primitive_mutex is a ConditionVariable, then this can be used to wait for a signal.
     template<typename Predicate>
-    void wait(Predicate pred) { this->m_unlocked->m_primitive_mutex.wait(pred); }
+    void wait(Predicate pred) { this->m_unlocked->mutex().wait(pred); }
     // If m_primitive_mutex is a ConditionVariable then this can be used to wake up the waiting thread.
-    void notify_one() { this->m_unlocked->m_primitive_mutex.notify_one(); }
+    void notify_one() { this->m_unlocked->mutex().notify_one(); }
 
     // Experimental unlock/relock. Const because we must be able to call it on a rat type (which is const).
     void unlock() const
     {
 #if THREADSAFE_DEBUG
-      this->m_unlocked->m_ref--;
+      this->m_unlocked->decrement_ref();
 #endif // THREADSAFE_DEBUG
-      this->m_unlocked->m_primitive_mutex.unlock();
+      this->m_unlocked->mutex().unlock();
       this->m_unlocked = nullptr;
     }
 
@@ -772,9 +858,9 @@ struct AccessConst
     {
       m_unlocked = const_cast<UNLOCKED*>(&unlocked);
 #if THREADSAFE_DEBUG
-      m_unlocked->m_ref++;
+      m_unlocked->increment_ref();
 #endif // THREADSAFE_DEBUG
-      this->m_unlocked->m_primitive_mutex.lock();
+      this->m_unlocked->mutex().lock();
     }
 
   protected:
@@ -845,12 +931,14 @@ template<class UNLOCKED>
 struct OTAccessConst
 {
   public:
+    using unlocked_type = UNLOCKED;
+
     /// Construct a OTAccessConst from a constant Unlocked.
     template<typename ...Args>
     OTAccessConst(UNLOCKED const& unlocked, Args&&... args) : m_unlocked(const_cast<UNLOCKED*>(&unlocked), std::forward<Args>(args)...)
     {
 #if THREADSAFE_DEBUG
-      m_unlocked->m_ref++;
+      m_unlocked->increment_ref();
       assert(aithreadid::is_single_threaded(unlocked.m_thread_id));
 #endif // THREADSAFE_DEBUG
     }
@@ -859,7 +947,7 @@ struct OTAccessConst
     ~OTAccessConst()
     {
       if (this->m_unlocked)
-        m_unlocked->m_ref--;
+        m_unlocked->decrement_ref();
     }
 #endif // THREADSAFE_DEBUG
 
@@ -933,11 +1021,15 @@ class ReadWriteRef : public ReadWriteAccess<RWMUTEX>
     template<class UNLOCKED> friend struct WriteAccess;
     template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
-    RWMUTEX& m_read_write_mutex;
+    // Use a pointer in order to keep our assignment operator, which in turn
+    // that allows assigning to UnlockedBase still.
+    RWMUTEX* m_read_write_mutex_ptr;
 
-    RWMUTEX& mutex() { return m_read_write_mutex; }
+    RWMUTEX& mutex() { return *m_read_write_mutex_ptr; }
 
-    ReadWriteRef(RWMUTEX& read_write_mutex) : m_read_write_mutex(read_write_mutex) { }
+    ReadWriteRef(RWMUTEX& read_write_mutex) : m_read_write_mutex_ptr(&read_write_mutex) { }
+
+    ReadWriteRef(ReadWriteRef const&) = default;
 };
 
 template<class RWMUTEX>
@@ -982,11 +1074,11 @@ class PrimitiveRef : public PrimitiveAccess<MUTEX>
     template<class UNLOCKED> friend struct Access;
     template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
-    MUTEX& m_primitive_mutex;
+    MUTEX* m_primitive_mutex_ptr;
 
-    PrimitiveRef(MUTEX& primitive_mutex) : m_primitive_mutex(primitive_mutex) { }
+    PrimitiveRef(MUTEX& primitive_mutex) : m_primitive_mutex_ptr(&primitive_mutex) { }
 
-    MUTEX& mutex() { return m_primitive_mutex; }
+    MUTEX& mutex() { return *m_primitive_mutex_ptr; }
 };
 
 template<class MUTEX>
@@ -1029,17 +1121,19 @@ class OneThreadRef : public OneThreadAccess
 #endif
         )
 #if THREADSAFE_DEBUG
-      : m_thread_id(thread_id)
+      : m_thread_id(&thread_id)
 #endif
     { }
+
+    OneThreadRef(OneThreadRef const&) = default;
 
     template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
 #if THREADSAFE_DEBUG
-    std::thread::id& m_thread_id;
+    std::thread::id* m_thread_id;
 
     // Hijack mutex() to pass the reference to m_thread_id %-).
-    std::thread::id& mutex() { return m_thread_id; }
+    std::thread::id& mutex() { return *m_thread_id; }
 #else
     int mutex() { return {}; }
 #endif // THREADSAFE_DEBUG
