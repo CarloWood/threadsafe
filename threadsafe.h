@@ -464,7 +464,7 @@ template<typename BASE, typename POLICY_MUTEX>
 char const* NameConstUnlockedBase<BASE, POLICY_MUTEX>::name = libcwd::type_info_of<ConstUnlockedBase<BASE, POLICY_MUTEX>>().demangled_name();
 #endif
 template<typename BASE, typename POLICY_MUTEX>
-class ConstUnlockedBase : POLICY_MUTEX::reference_type
+class ConstUnlockedBase : public POLICY_MUTEX::reference_type
 #if THREADSAFE_TRACK_UNLOCKED
                  , public tracked::Tracked<&NameConstUnlockedBase<BASE, POLICY_MUTEX>::name>
 #endif
@@ -487,7 +487,7 @@ class ConstUnlockedBase : POLICY_MUTEX::reference_type
     requires std::derived_from<T, BASE>
     ConstUnlockedBase(Unlocked<T, POLICY_MUTEX> const& unlocked) :
       POLICY_MUTEX::reference_type(const_cast<Unlocked<T, POLICY_MUTEX>&>(unlocked).mutex()),
-      m_base(const_cast<BASE*>(&unlocked))
+      m_base(const_cast<BASE*>(static_cast<BASE const*>(&unlocked)))
 #if THREADSAFE_DEBUG
       , m_ref_ptr(&const_cast<Unlocked<T, POLICY_MUTEX>&>(unlocked).m_ref)
 #endif // THREADSAFE_DEBUG
@@ -588,7 +588,7 @@ class ConstUnlockedBase : POLICY_MUTEX::reference_type
       return {orig};
     }
 
-  private:
+  protected:
     BASE* m_base;
 
   protected:
@@ -598,6 +598,10 @@ class ConstUnlockedBase : POLICY_MUTEX::reference_type
 #if THREADSAFE_DEBUG
   private:
     std::atomic<int>* m_ref_ptr;
+
+    // The crat type, which is a friend, is ConstReadAccess<threadsafe::ConstUnlockedBase<BASE, POLICY_MUTEX>>.
+    // But the base class of ReadAccess, which uses UnlockedBase, also needs access to increment_ref/decrement_ref:
+    friend class ConstReadAccess<threadsafe::UnlockedBase<BASE, POLICY_MUTEX>>;
 
     void increment_ref() { (*m_ref_ptr)++; }
     void decrement_ref() { (*m_ref_ptr)--; }
@@ -692,9 +696,9 @@ struct ConstReadAccess
     ConstReadAccess(UNLOCKED const& unlocked, Args&&... args) : m_unlocked(const_cast<UNLOCKED*>(&unlocked)), m_state(readlocked)
     {
 #if THREADSAFE_DEBUG
-      m_unlocked->m_ref++;
+      m_unlocked->increment_ref();
 #endif // THREADSAFE_DEBUG
-      m_unlocked->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
+      m_unlocked->mutex().rdlock(std::forward<Args>(args)...);
     }
 
     /// Destruct the Access object.
@@ -704,13 +708,13 @@ struct ConstReadAccess
       if (AI_UNLIKELY(!m_unlocked))
         return;
       if (m_state == readlocked)
-	m_unlocked->m_read_write_mutex.rdunlock();
+	m_unlocked->mutex().rdunlock();
       else if (m_state == writelocked)
-	m_unlocked->m_read_write_mutex.wrunlock();
+	m_unlocked->mutex().wrunlock();
       else if (m_state == read2writelocked)
-	m_unlocked->m_read_write_mutex.wr2rdlock();
+	m_unlocked->mutex().wr2rdlock();
 #if THREADSAFE_DEBUG
-      m_unlocked->m_ref--;
+      m_unlocked->decrement_ref();
 #endif // THREADSAFE_DEBUG
     }
 
@@ -725,7 +729,7 @@ struct ConstReadAccess
     ConstReadAccess(UNLOCKED& unlocked, state_type state) : m_unlocked(&unlocked), m_state(state)
     {
 #if THREADSAFE_DEBUG
-      m_unlocked->m_ref++;
+      m_unlocked->increment_ref();
 #endif // THREADSAFE_DEBUG
     }
 
@@ -756,16 +760,16 @@ class Write2ReadCarry
     explicit Write2ReadCarry(UNLOCKED& unlocked) : m_unlocked(unlocked), m_used(false)
     {
 #if THREADSAFE_DEBUG
-      m_unlocked.m_ref++;
+      m_unlocked.increment_ref();
 #endif // THREADSAFE_DEBUG
     }
     ~Write2ReadCarry()
     {
 #if THREADSAFE_DEBUG
-      m_unlocked.m_ref--;
+      m_unlocked.decrement_ref();
 #endif // THREADSAFE_DEBUG
       if (m_used)
-	m_unlocked.m_read_write_mutex.rdunlock();
+	m_unlocked.mutex().rdunlock();
     }
 
     friend struct WriteAccess<UNLOCKED>;
@@ -787,7 +791,7 @@ struct ReadAccess : public ConstReadAccess<UNLOCKED>
     template<typename ...Args>
     explicit ReadAccess(UNLOCKED& unlocked, Args&&... args) : ConstReadAccess<UNLOCKED>(unlocked, readlocked)
     {
-      this->m_unlocked->m_read_write_mutex.rdlock(std::forward<Args>(args)...);
+      this->m_unlocked->mutex().rdlock(std::forward<Args>(args)...);
     }
 
     /// Construct a ReadAccess from a Write2ReadCarry object containing an read locked Unlocked. Upon destruction leave the Unlocked read locked.
@@ -820,7 +824,7 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
     template<typename ...Args>
     explicit WriteAccess(UNLOCKED& unlocked, Args&&... args) : ReadAccess<UNLOCKED>(unlocked, writelocked)
     {
-      this->m_unlocked->m_read_write_mutex.wrlock(std::forward<Args>(args)...);
+      this->m_unlocked->mutex().wrlock(std::forward<Args>(args)...);
     }
 
     /// Promote read access to write access.
@@ -829,7 +833,7 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
     {
       if (access.m_state == readlocked)
       {
-	this->m_unlocked->m_read_write_mutex.rd2wrlock();
+	this->m_unlocked->mutex().rd2wrlock();
         // We should have initialized the base class with read2writelocked, but if rd2wrlock() throws
         // then the base class destructor ~ConstReadAccess would call wr2rdlock() as if obtaining the
         // write-lock had succeeded. In order to stop it from doing that, we did set m_state to
@@ -844,14 +848,14 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
     {
       assert(!w2rc.m_used); // Always pass a w2rCarry to the wat first. There can only be one wat.
       w2rc.m_used = true;
-      this->m_unlocked->m_read_write_mutex.wrlock();
+      this->m_unlocked->mutex().wrlock();
     }
 
     /// Access the underlaying object for (read and) write access.
     typename UNLOCKED::data_type* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for (read and) write access.
-    typename UNLOCKED::data_type& operator*() const { return *this->m_unlocked->ptr; }
+    typename UNLOCKED::data_type& operator*() const { return *this->m_unlocked->ptr(); }
 };
 
 /**
@@ -872,10 +876,10 @@ struct AccessConst
       this->m_unlocked->mutex().lock(std::forward<Args>(args)...);
     }
 
-    /// Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for read access.
     typename UNLOCKED::data_type const* operator->() const { return this->m_unlocked->ptr(); }
 
-    /// Access the underlaying object for (read and) write access.
+    /// Access the underlaying object for read access.
     typename UNLOCKED::data_type const& operator*() const { return *this->m_unlocked->ptr(); }
 
     ~AccessConst()
@@ -947,33 +951,25 @@ struct ConstAccess : public AccessConst<UNLOCKED>
  * @brief Write lock object and provide read/write access.
  */
 template<class UNLOCKED>
-struct Access : public AccessConst<UNLOCKED>
+struct Access : public ConstAccess<UNLOCKED>
 {
   public:
     /// Construct a Access from a non-constant Unlocked.
     template<typename ...Args>
-    explicit Access(UNLOCKED& unlocked, Args&&... args) : AccessConst<UNLOCKED>(unlocked, std::forward<Args>(args)...) { }
+    explicit Access(UNLOCKED& unlocked, Args&&... args) : ConstAccess<UNLOCKED>(unlocked, std::forward<Args>(args)...) { }
 
     /// Access the underlaying object for (read and) write access.
     typename UNLOCKED::data_type* operator->() const { return this->m_unlocked->ptr(); }
 
     /// Access the underlaying object for (read and) write access.
     typename UNLOCKED::data_type& operator*() const { return *this->m_unlocked->ptr(); }
-
-    operator ConstAccess<UNLOCKED> const&() const
-    {
-      AccessConst<UNLOCKED> const& base = *this;
-      // Like a reinterpret_cast, which only works because neither Access nor ConstAccess have members nor virtual functions.
-      return static_cast<ConstAccess<UNLOCKED> const&>(base);
-    }
 };
 
 // Explicitly convert a ConstAccess to an Access type.
 template<class UNLOCKED>
 Access<UNLOCKED> const& wat_cast(ConstAccess<UNLOCKED> const& access)
 {
-  AccessConst<UNLOCKED> const& base = access;
-  return static_cast<Access<UNLOCKED> const&>(base);
+  return static_cast<Access<UNLOCKED> const&>(access);
 }
 
 /**
@@ -1068,9 +1064,9 @@ template<class RWMUTEX>
 class ReadWriteRef : public ReadWriteAccess<RWMUTEX>
 {
   protected:
-    template<class UNLOCKED> friend struct ConstReadAccess;
-    template<class UNLOCKED> friend struct ReadAccess;
-    template<class UNLOCKED> friend struct WriteAccess;
+    template<class UNLOCKED> friend struct ::threadsafe::ConstReadAccess;
+    template<class UNLOCKED> friend struct ::threadsafe::ReadAccess;
+    template<class UNLOCKED> friend struct ::threadsafe::WriteAccess;
     template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
     // Use a pointer in order to keep our assignment operator, which in turn
