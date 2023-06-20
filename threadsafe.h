@@ -453,6 +453,16 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
  * Moving and copying an UnlockedBase is prefectly fine; just like it would be to move/copy a
  * base class pointer.
  */
+
+#if THREADSAFE_DEBUG
+// Forward declarations.
+template<class UNLOCKED>
+struct ConstReadAccess;
+
+template<typename BASE, typename POLICY_MUTEX>
+class UnlockedBase;
+#endif
+
 #if THREADSAFE_TRACK_UNLOCKED
 template<typename BASE, typename POLICY_MUTEX>
 class ConstUnlockedBase;
@@ -859,7 +869,9 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
 };
 
 /**
- * @brief Write lock object and provide read access.
+ * @brief The Const-Read-Access-Type (crat) of a Primitive locked object.
+ *
+ * This object can not be converted to a wat.
  */
 template<class UNLOCKED>
 struct AccessConst
@@ -930,25 +942,24 @@ struct AccessConst
 };
 
 /**
- * @brief Write lock object and provide read/write access.
+ * @brief The Read-Access-Type (rat) of a Primitive locked object.
  */
 template<class UNLOCKED>
 struct ConstAccess : public AccessConst<UNLOCKED>
 {
   public:
-    /// Construct a Access from a non-constant Unlocked.
-    template<typename ...Args>
-    explicit ConstAccess(UNLOCKED& unlocked, Args&&... args) : AccessConst<UNLOCKED>(unlocked, std::forward<Args>(args)...) { }
-
-    /// Access the underlaying object for (read and) write access.
-    typename UNLOCKED::data_type const* operator->() const { return this->m_unlocked->ptr(); }
-
-    /// Access the underlaying object for (read and) write access.
-    typename UNLOCKED::data_type const& operator*() const { return *this->m_unlocked->ptr(); }
+    using AccessConst<UNLOCKED>::AccessConst;
 };
 
 /**
- * @brief Write lock object and provide read/write access.
+ * @brief The Write-Access-Type (wat) of a Primitive locked object.
+ *
+ * This access type provides non-const (write) access.
+ *
+ * It is not possible to create an Access type from a ConstAccess
+ * because that would require recursive locking of the mutex, which
+ * might not be supported. Instead, use `wat_cast` to convert a
+ * rat into a wat when needed.
  */
 template<class UNLOCKED>
 struct Access : public ConstAccess<UNLOCKED>
