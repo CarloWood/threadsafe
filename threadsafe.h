@@ -498,12 +498,11 @@ class ConstUnlockedBase : public POLICY_MUTEX::reference_type
     using data_type = BASE;
     using policy_type = typename POLICY_MUTEX::reference_type;
     using const_unlocked_type = ConstUnlockedBase<BASE, POLICY_MUTEX>;
-    using non_const_unlocked_type = UnlockedBase<BASE, POLICY_MUTEX>;
 
     // The access types.
     using crat = typename policy_type::template access_types<ConstUnlockedBase<BASE, POLICY_MUTEX>>::const_read_access_type;
     using w2rCarry = typename policy_type::template access_types<UnlockedBase<BASE, POLICY_MUTEX>>::write_to_read_carry;
-    using ratBase = typename policy_type::template access_types<ConstUnlockedBase<BASE, POLICY_MUTEX>>::read_access_base_type;
+    using ratBase = typename policy_type::template access_types<UnlockedBase<BASE, POLICY_MUTEX>>::read_access_base_type;
 
   public:
     template<typename T>
@@ -1147,13 +1146,13 @@ class ReadWriteAccess
       using read_access_type = ReadAccess<UNLOCKED>;
       using write_access_type = WriteAccess<UNLOCKED>;
       using write_to_read_carry = Write2ReadCarry<UNLOCKED>;
+      using read_access_base_type = ConstReadAccess<UNLOCKED>;
     };
 
     template<class UNLOCKED>
     struct access_types_const_unlocked_base
     {
       using const_read_access_type = ConstReadAccess<UNLOCKED>;
-      using read_access_base_type = ConstReadAccess<typename UNLOCKED::non_const_unlocked_type>;
     };
 
     template<class UNLOCKED>
@@ -1246,13 +1245,13 @@ class PrimitiveAccess
       using read_access_type = ConstAccess<UNLOCKED>;
       using write_access_type = Access<UNLOCKED>;
       using write_to_read_carry = unsupported_w2rCarry<UNLOCKED>;
+      using read_access_base_type = AccessConst<UNLOCKED>;
     };
 
     template<class UNLOCKED>
     struct access_types_const_unlocked_base
     {
       using const_read_access_type = AccessConst<UNLOCKED>;
-      using read_access_base_type = AccessConst<typename UNLOCKED::non_const_unlocked_type>;
     };
 
     template<class UNLOCKED>
@@ -1329,13 +1328,13 @@ class OneThreadAccess
       using read_access_type = OTAccess<UNLOCKED>;
       using write_access_type = OTAccess<UNLOCKED>;
       using write_to_read_carry = unsupported_w2rCarry<UNLOCKED>;
+      using read_access_base_type = OTAccessConst<UNLOCKED>;
     };
 
     template<class UNLOCKED>
     struct access_types_const_unlocked_base
     {
       using const_read_access_type = OTAccessConst<UNLOCKED>;
-      using read_access_base_type = OTAccessConst<typename UNLOCKED::non_const_unlocked_type>;
     };
 
     template<class UNLOCKED>
