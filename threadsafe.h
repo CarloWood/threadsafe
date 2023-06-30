@@ -143,7 +143,7 @@
 
 #ifdef CWDEBUG
 // Set this to 1 to print tracking information about Unlocked and UnlockedBase to dc::tracked.
-#define THREADSAFE_TRACK_UNLOCKED 1
+#define THREADSAFE_TRACK_UNLOCKED 0
 #if THREADSAFE_TRACK_UNLOCKED
 #include <cwds/tracked.h>
 #include <libcwd/type_info.h>
@@ -555,7 +555,8 @@ class ConstUnlockedBase : public POLICY_MUTEX::reference_type
     ~ConstUnlockedBase()
     {
       if constexpr (std::derived_from<BASE, AIRefCount>)
-        m_base->allow_deletion();
+        if (m_base)     // This will be nullptr when this object was moved.
+          m_base->allow_deletion();
     }
 
     ConstUnlockedBase& operator=(ConstUnlockedBase const& other)
@@ -571,8 +572,35 @@ class ConstUnlockedBase : public POLICY_MUTEX::reference_type
       return *this;
     }
 
-    ConstUnlockedBase(ConstUnlockedBase&& orig) = default;
-    ConstUnlockedBase& operator=(ConstUnlockedBase&& orig) = default;
+    ConstUnlockedBase(ConstUnlockedBase&& orig) : POLICY_MUTEX::reference_type(std::move(orig)),
+#if THREADSAFE_TRACK_UNLOCKED
+        tracked::Tracked<&NameConstUnlockedBase<BASE, POLICY_MUTEX>::name>(std::move(orig)),
+#endif
+        m_base(orig.m_base)
+#if THREADSAFE_TRACK_UNLOCKED
+        , m_ref_ptr(orig.m_ref_ptr)
+#endif
+    {
+      if constexpr (std::derived_from<BASE, AIRefCount>)
+        orig.m_base = nullptr;  // Stop the destructor from decrementing the reference count when an object was moved.
+    }
+
+    ConstUnlockedBase& operator=(ConstUnlockedBase&& orig)
+    {
+      if (this == &orig)
+        return *this;
+      POLICY_MUTEX::reference_type::operator=(std::move(orig));
+#if THREADSAFE_TRACK_UNLOCKED
+      tracked::Tracked<&NameConstUnlockedBase<BASE, POLICY_MUTEX>::name>::operator=(std::move(orig));
+#endif
+      m_base = orig.m_base;
+#if THREADSAFE_TRACK_UNLOCKED
+      m_ref_ptr = orig.m_ref_ptr;
+#endif
+      if constexpr (std::derived_from<BASE, AIRefCount>)
+        orig.m_base = nullptr;  // Stop the destructor from decrementing the reference count when an object was moved.
+      return *this;
+    }
 
   private:
     // Used by unlocked_cast.
@@ -608,6 +636,14 @@ class ConstUnlockedBase : public POLICY_MUTEX::reference_type
     friend U unlocked_cast(ConstUnlockedBase const& orig)
     {
       return {orig};
+    }
+
+  protected:
+    // Called by unlocked_cast defined in UnlockedBase.
+    template<typename U>
+    static U unlocked_cast(BASE* base)
+    {
+      return static_cast<U>(*base);
     }
 
   protected:
@@ -681,7 +717,7 @@ class UnlockedBase : public ConstUnlockedBase<BASE, POLICY_MUTEX>
              std::derived_from<typename std::remove_cvref<U>::type::data_type, BASE>
     friend U unlocked_cast(UnlockedBase& orig)
     {
-      return static_cast<U>(*orig.m_base);
+      return ConstUnlockedBase<BASE, POLICY_MUTEX>::template unlocked_cast<U>(orig.m_base);
     }
 
     template<typename U>
