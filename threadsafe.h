@@ -381,13 +381,49 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
 
   public:
     // Allow arbitrary parameters to be passed for construction.
+    //
+    // However, do not allow any arguments that are (derived from) this type because right here
+    // we have access to T, even though it is a protected base class: allowing an Unlocked type
+    // could possibly be interpreted as a T, giving access to that T without having it locked!
+    //
+    // Also require that if a single argument is used that is not convertible to a crat const&:
+    // in that case we want to use the constructor below.
     template<typename... ARGS>
+    requires (std::negation_v<std::is_base_of<Unlocked, std::decay_t<ARGS>>> && ...) &&
+        (sizeof...(ARGS) != 1 || !std::is_convertible_v<std::tuple_element_t<0, std::tuple<ARGS...>>, crat const&>)
     Unlocked(ARGS&&... args) : T(std::forward<ARGS>(args)...)
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
     {
     }
+
+    // Allow construction from a read-locked other unlocked.
+    // This uses the copy constructor of T and creates a brand new mutex.
+    Unlocked(crat const& unlocked_r) : T(static_cast<T const&>(*unlocked_r))
+#if THREADSAFE_DEBUG
+      , m_ref(0)
+#endif // THREADSAFE_DEBUG
+    {
+    }
+
+    // Copying an Unlocked type is not thread-safe, use the above constructor instead.
+    Unlocked(Unlocked const&) = delete;
+
+    // Moving an Unlocked type will write-lock the orig.
+    // This uses the move constructor of T and creates a brand new mutex.
+    Unlocked(Unlocked&& orig) : T(std::move(static_cast<T const&>(orig.do_wrlock())))
+#if THREADSAFE_DEBUG
+      , m_ref(0)
+#endif // THREADSAFE_DEBUG
+    {
+      orig.do_wrunlock();
+    }
+
+  private:
+   // Used by the above constructor.
+   Unlocked const& do_wrlock();
+   void do_wrunlock();
 
   protected:
     // Only these may access the object (through ptr()).
@@ -1157,6 +1193,25 @@ requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_speciali
 OTAccess<UNLOCKED> const& wat_cast(OTConstAccess<UNLOCKED> const& access)
 {
   return static_cast<OTAccess<UNLOCKED> const&>(access);
+}
+
+template<typename T, typename POLICY_MUTEX>
+Unlocked<T, POLICY_MUTEX> const& Unlocked<T, POLICY_MUTEX>::do_wrlock()
+{
+  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().wrlock();
+  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().lock();
+  return *this;
+}
+
+template<typename T, typename POLICY_MUTEX>
+void Unlocked<T, POLICY_MUTEX>::do_wrunlock()
+{
+  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().wrunlock();
+  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().unlock();
 }
 
 namespace policy
