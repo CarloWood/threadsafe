@@ -158,6 +158,17 @@ namespace threadsafe {
 template<typename T, typename POLICY_MUTEX>
 class Unlocked;
 
+template<typename TrackedLockedType, typename POLICY_MUTEX>
+class UnlockedTrackedObject;
+
+template<typename TrackedType>
+requires utils::is_specialization_of_v<TrackedType, UnlockedTrackedObject>
+class ObjectTracker;
+
+template<typename TrackedType, typename Tracker>
+requires utils::is_specialization_of_v<Tracker, ObjectTracker>
+class TrackedObject;
+
 template<typename T, typename POLICY_MUTEX>
 requires std::derived_from<T, AIRefCount>
 void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX> const* ptr);
@@ -379,6 +390,14 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
     requires std::derived_from<T2, AIRefCount>
     friend void intrusive_ptr_release(Unlocked<T2, POLICY_MUTEX2> const* ptr);
 
+    template<typename TrackedType, typename Tracker>
+    requires utils::is_specialization_of_v<Tracker, ObjectTracker>
+    friend class TrackedObject;
+
+    template<typename TrackedType>
+    requires utils::is_specialization_of_v<TrackedType, UnlockedTrackedObject>
+    friend class ObjectTracker;
+
   public:
     // Allow arbitrary parameters to be passed for construction.
     //
@@ -412,7 +431,7 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
 
     // Moving an Unlocked type will write-lock the orig.
     // This uses the move constructor of T and creates a brand new mutex.
-    Unlocked(Unlocked&& orig) : T(std::move(static_cast<T const&>(orig.do_wrlock())))
+    Unlocked(Unlocked&& orig) : T(std::move(static_cast<T&>(orig.do_wrlock())))
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
@@ -420,10 +439,19 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
       orig.do_wrunlock();
     }
 
-  private:
+  protected:
    // Used by the above constructor.
-   Unlocked const& do_wrlock();
+   Unlocked& do_wrlock();
    void do_wrunlock();
+
+   // This move-constructor can be used from a derived class, which then has to do the locking!
+   enum no_locking_t { NoLock };
+   Unlocked(Unlocked&& orig, no_locking_t) : T(std::move(static_cast<T&>(orig)))
+#if THREADSAFE_DEBUG
+      , m_ref(0)
+#endif // THREADSAFE_DEBUG
+   {
+   }
 
   protected:
     // Only these may access the object (through ptr()).
@@ -1196,7 +1224,7 @@ OTAccess<UNLOCKED> const& wat_cast(OTConstAccess<UNLOCKED> const& access)
 }
 
 template<typename T, typename POLICY_MUTEX>
-Unlocked<T, POLICY_MUTEX> const& Unlocked<T, POLICY_MUTEX>::do_wrlock()
+Unlocked<T, POLICY_MUTEX>& Unlocked<T, POLICY_MUTEX>::do_wrlock()
 {
   if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
     this->mutex().wrlock();
