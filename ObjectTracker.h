@@ -1,9 +1,10 @@
 #pragma once
 
-#include <memory>
-#include <atomic>
+#include "AIReadWriteSpinLock.h"
 #include "threadsafe.h"
 #include "utils/Badge.h"
+#include <memory>
+#include <atomic>
 #include "debug.h"
 
 // threadsafe::ObjectTracker
@@ -107,7 +108,7 @@ class UnlockedTrackedObject final : public Unlocked<TrackedLockedType, POLICY_MU
 //
 // The type of the tracker returned by the above class (UnlockedTrackedObject).
 // It is based around an UnlockedBase that provides both, the data pointer
-// and the data mutex pointer and is itself protected by tracked_unlocked_ptr_mutex_.
+// and the data mutex pointer and is itself protected by Unlocked.
 //
 // The template parameter TrackedType must be the above UnlockedTrackedObject.
 // This class then must be passed as second template parameter to TrackedObject,
@@ -150,8 +151,8 @@ class ObjectTracker
   using w2rCarry = typename UnlockedBaseTrackedObject::w2rCarry;
 
  protected:
-  mutable std::mutex tracked_unlocked_ptr_mutex_;
-  UnlockedBaseTrackedObject tracked_unlocked_ptr_;
+  using tracked_unlocked_ptr_type = Unlocked<UnlockedBaseTrackedObject, policy::ReadWrite<AIReadWriteSpinLock>>;
+  tracked_unlocked_ptr_type tracked_unlocked_ptr_;
 
   // Used by trackers that are derived from ObjectTracker.
   ObjectTracker(tracked_type const& tracked_unlocked) : tracked_unlocked_ptr_(tracked_unlocked) { }
@@ -164,28 +165,28 @@ class ObjectTracker
   // This is called when the object is moved in memory, see below.
   void set_tracked_unlocked(utils::Badge<TrackedObject<tracked_type, ObjectTracker>>, tracked_type* tracked_unlocked_ptr)
   {
-    std::scoped_lock<std::mutex> lk(tracked_unlocked_ptr_mutex_);
+    tracked_unlocked_ptr_type::wat tracked_unlocked_ptr_w(tracked_unlocked_ptr_);
     // This is called while the mutex of the tracked_type is locked.
-    tracked_unlocked_ptr_.set_tracked_unlocked(tracked_unlocked_ptr);
+    tracked_unlocked_ptr_w->set_tracked_unlocked(tracked_unlocked_ptr);
   }
 
   void update_mutex_pointer(auto* mutex_ptr)
   {
-    std::scoped_lock<std::mutex> lk(tracked_unlocked_ptr_mutex_);
-    tracked_unlocked_ptr_.update_mutex_pointer(mutex_ptr);
+    tracked_unlocked_ptr_type::wat tracked_unlocked_ptr_w(tracked_unlocked_ptr_);
+    tracked_unlocked_ptr_w->update_mutex_pointer(mutex_ptr);
   }
 
   // Accessors.
   rat tracked_rat()
   {
-    std::scoped_lock<std::mutex> lk(tracked_unlocked_ptr_mutex_);
+    tracked_unlocked_ptr_type::crat tracked_unlocked_ptr_r(tracked_unlocked_ptr_);
     // rat wants to be explicitly constructed from a non-const reference.
-    return rat{tracked_unlocked_ptr_};
+    return rat{*tracked_unlocked_ptr_r};
   }
   wat tracked_wat()
   {
-    std::scoped_lock<std::mutex> lk(tracked_unlocked_ptr_mutex_);
-    return wat{tracked_unlocked_ptr_};
+    tracked_unlocked_ptr_type::crat tracked_unlocked_ptr_r(tracked_unlocked_ptr_);
+    return wat{*tracked_unlocked_ptr_r};
   }
 };
 
