@@ -165,28 +165,28 @@ class ObjectTracker
   // This is called when the object is moved in memory, see below.
   void set_tracked_unlocked(utils::Badge<TrackedObject<tracked_type, ObjectTracker>>, tracked_type* tracked_unlocked_ptr)
   {
-    tracked_unlocked_ptr_type::wat tracked_unlocked_ptr_w(tracked_unlocked_ptr_);
+    typename tracked_unlocked_ptr_type::wat tracked_unlocked_ptr_w(tracked_unlocked_ptr_);
     // This is called while the mutex of the tracked_type is locked.
     tracked_unlocked_ptr_w->set_tracked_unlocked(tracked_unlocked_ptr);
   }
 
   void update_mutex_pointer(auto* mutex_ptr)
   {
-    tracked_unlocked_ptr_type::wat tracked_unlocked_ptr_w(tracked_unlocked_ptr_);
+    typename tracked_unlocked_ptr_type::wat tracked_unlocked_ptr_w(tracked_unlocked_ptr_);
     tracked_unlocked_ptr_w->update_mutex_pointer(mutex_ptr);
   }
 
   // Accessors.
   rat tracked_rat()
   {
-    tracked_unlocked_ptr_type::crat tracked_unlocked_ptr_r(tracked_unlocked_ptr_);
+    typename tracked_unlocked_ptr_type::rat tracked_unlocked_ptr_r(tracked_unlocked_ptr_);
     // rat wants to be explicitly constructed from a non-const reference.
-    return rat{*tracked_unlocked_ptr_r};
+    return rat{const_cast<UnlockedBaseTrackedObject&>(*tracked_unlocked_ptr_r)};
   }
   wat tracked_wat()
   {
-    tracked_unlocked_ptr_type::crat tracked_unlocked_ptr_r(tracked_unlocked_ptr_);
-    return wat{*tracked_unlocked_ptr_r};
+    typename tracked_unlocked_ptr_type::rat tracked_unlocked_ptr_r(tracked_unlocked_ptr_);
+    return wat{const_cast<UnlockedBaseTrackedObject&>(*tracked_unlocked_ptr_r)};
   }
 };
 

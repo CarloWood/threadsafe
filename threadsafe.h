@@ -830,7 +830,7 @@ struct ConstReadAccess
 #if THREADSAFE_DEBUG
       m_unlocked->increment_ref();
 #endif // THREADSAFE_DEBUG
-      m_unlocked->mutex().rdlock(std::forward<Args>(args)...);
+      m_unlocked->UNLOCKED::policy_type::mutex().rdlock(std::forward<Args>(args)...);
     }
 
     /// Destruct the Access object.
@@ -840,11 +840,11 @@ struct ConstReadAccess
       if (AI_UNLIKELY(!m_unlocked))
         return;
       if (m_state == readlocked)
-	m_unlocked->mutex().rdunlock();
+	m_unlocked->UNLOCKED::policy_type::mutex().rdunlock();
       else if (m_state == writelocked)
-	m_unlocked->mutex().wrunlock();
+	m_unlocked->UNLOCKED::policy_type::mutex().wrunlock();
       else if (m_state == read2writelocked)
-	m_unlocked->mutex().wr2rdlock();
+	m_unlocked->UNLOCKED::policy_type::mutex().wr2rdlock();
 #if THREADSAFE_DEBUG
       m_unlocked->decrement_ref();
 #endif // THREADSAFE_DEBUG
@@ -930,7 +930,7 @@ struct ReadAccess : public ConstReadAccess<UNLOCKED>
     template<typename ...Args>
     explicit ReadAccess(UNLOCKED& unlocked, Args&&... args) : ConstReadAccess<UNLOCKED>(unlocked, readlocked)
     {
-      this->m_unlocked->mutex().rdlock(std::forward<Args>(args)...);
+      this->m_unlocked->UNLOCKED::policy_type::mutex().rdlock(std::forward<Args>(args)...);
     }
 
     /// Construct a ReadAccess from a Write2ReadCarry object containing an read locked Unlocked. Upon destruction leave the Unlocked read locked.
@@ -973,7 +973,7 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
     template<typename ...Args>
     explicit WriteAccess(UNLOCKED& unlocked, Args&&... args) : ReadAccess<UNLOCKED>(unlocked, writelocked)
     {
-      this->m_unlocked->mutex().wrlock(std::forward<Args>(args)...);
+      this->m_unlocked->UNLOCKED::policy_type::mutex().wrlock(std::forward<Args>(args)...);
     }
 
     /// Promote read access to write access.
@@ -982,7 +982,7 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
     {
       if (access.m_state == readlocked)
       {
-	this->m_unlocked->mutex().rd2wrlock();
+	this->m_unlocked->UNLOCKED::policy_type::mutex().rd2wrlock();
         // We should have initialized the base class with read2writelocked, but if rd2wrlock() throws
         // then the base class destructor ~ConstReadAccess would call wr2rdlock() as if obtaining the
         // write-lock had succeeded. In order to stop it from doing that, we did set m_state to
@@ -997,7 +997,7 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
     {
       assert(!w2rc.m_used); // Always pass a w2rCarry to the wat first. There can only be one wat.
       w2rc.m_used = true;
-      this->m_unlocked->mutex().wrlock();
+      this->m_unlocked->UNLOCKED::policy_type::mutex().wrlock();
     }
 
     /// Access the underlaying object for (read and) write access.
@@ -1024,7 +1024,7 @@ struct AccessConst
 #if THREADSAFE_DEBUG
       m_unlocked->increment_ref();
 #endif // THREADSAFE_DEBUG
-      this->m_unlocked->mutex().lock(std::forward<Args>(args)...);
+      this->m_unlocked->UNLOCKED::policy_type::mutex().lock(std::forward<Args>(args)...);
     }
 
     /// Access the underlaying object for read access.
@@ -1040,15 +1040,15 @@ struct AccessConst
 #if THREADSAFE_DEBUG
         this->m_unlocked->decrement_ref();
 #endif // THREADSAFE_DEBUG
-        this->m_unlocked->mutex().unlock();
+        this->m_unlocked->UNLOCKED::policy_type::mutex().unlock();
       }
     }
 
     // If m_primitive_mutex is a ConditionVariable, then this can be used to wait for a signal.
     template<typename Predicate>
-    void wait(Predicate pred) { this->m_unlocked->mutex().wait(pred); }
+    void wait(Predicate pred) { this->m_unlocked->UNLOCKED::policy_type::mutex().wait(pred); }
     // If m_primitive_mutex is a ConditionVariable then this can be used to wake up the waiting thread.
-    void notify_one() { this->m_unlocked->mutex().notify_one(); }
+    void notify_one() { this->m_unlocked->UNLOCKED::policy_type::mutex().notify_one(); }
 
     // Experimental unlock/relock. Const because we must be able to call it on a rat type (which is const).
     void unlock() const
@@ -1056,7 +1056,7 @@ struct AccessConst
 #if THREADSAFE_DEBUG
       this->m_unlocked->decrement_ref();
 #endif // THREADSAFE_DEBUG
-      this->m_unlocked->mutex().unlock();
+      this->m_unlocked->UNLOCKED::policy_type::mutex().unlock();
       this->m_unlocked = nullptr;
     }
 
@@ -1067,7 +1067,7 @@ struct AccessConst
 #if THREADSAFE_DEBUG
       m_unlocked->increment_ref();
 #endif // THREADSAFE_DEBUG
-      this->m_unlocked->mutex().lock();
+      this->m_unlocked->UNLOCKED::policy_type::mutex().lock();
     }
 
   protected:
