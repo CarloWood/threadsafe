@@ -22,16 +22,22 @@
 class locked_Node;
 
 //-----------------------------------------------------------------------------
-// 1) If Node is a typedef, then it has to be defined next:
 
+#if UNLOCKED_TYPE_IS_TYPEDEF
+// 1) If Node is a typedef, then it has to be defined next:
 // Define the Unlocked version (using the desired locking policy):
 using Node = threadsafe::UnlockedTrackedObject<locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
+#else
+// 2) otherwise, forward declare Node.
+class Node;
+#endif
 
 // Then define a corresponding tracker class.
-//   1a) Either also as a typedef:
+#if TRACKER_IS_TYPEDEF
+//   Either also as a typedef:
 using NodeTracker = threadsafe::ObjectTracker<Node, locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
-
-//   1b) Or derived from ObjectTracker:
+#else
+//   Or derived from ObjectTracker:
 //
 //   Note: if you run into the compile error 'incomplete locked_Node' or UnlockedTrackedObject<locked_Node, ...> during the
 //   instantiation of the destructor of this NodeTracker class, then move its constructors and destructor out of the header
@@ -43,15 +49,7 @@ class NodeTracker : public threadsafe::ObjectTracker<Node, locked_Node, threadsa
   NodeTracker(utils::Badge<threadsafe::TrackedObject<Node, NodeTracker>>, Node const& tracked) :
     threadsafe::ObjectTracker<Node, locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>(tracked) { }
 };
-
-// 2) If Node is not a typedef but *derived* from UnlockedTrackedObject, then
-//    first define NodeTracker:
-//
-//   2a) Either as a typedef:
-using NodeTracker = threadsafe::ObjectTracker<Node>;
-
-//   2b) Or derived from ObjectTracker:
-//   See above.
+#endif
 
 // Finally define the locked type (the type that can only be accessed through an
 // access object, like NodeTracker::rat or NodeTracker::wat).
@@ -68,6 +66,15 @@ class locked_Node : public threadsafe::TrackedObject<Node, NodeTracker>
 
   std::string const& s() const { return s_; }
 };
+
+#if !UNLOCKED_TYPE_IS_TYPEDEF
+// If Node is not a typedef (2) then define Node after locked_Node:
+class Node : public threadsafe::UnlockedTrackedObject<locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>
+{
+ public:
+  using threadsafe::ObjectTracker<Node, locked_Node, threadsafe::policy::Primitive<std::mutex>>::ObjectTracker;
+};
+#endif
 
 int main()
 {
