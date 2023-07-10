@@ -143,7 +143,7 @@
 
 #ifdef CWDEBUG
 // Set this to 1 to print tracking information about Unlocked and UnlockedBase to dc::tracked.
-#define THREADSAFE_TRACK_UNLOCKED 0
+#define THREADSAFE_TRACK_UNLOCKED 1
 #if THREADSAFE_TRACK_UNLOCKED
 #include <cwds/tracked.h>
 #include <libcwd/type_info.h>
@@ -161,12 +161,10 @@ class Unlocked;
 template<typename TrackedLockedType, typename POLICY_MUTEX>
 class UnlockedTrackedObject;
 
-template<typename TrackedType>
-requires utils::is_specialization_of_v<TrackedType, UnlockedTrackedObject>
+template<typename TrackedType, typename TrackedLockedType, typename POLICY_MUTEX>
 class ObjectTracker;
 
 template<typename TrackedType, typename Tracker>
-requires utils::is_specialization_of_v<Tracker, ObjectTracker>
 class TrackedObject;
 
 template<typename T, typename POLICY_MUTEX>
@@ -358,10 +356,11 @@ char const* NameUnlocked<T, POLICY_MUTEX>::name =
   libcwd::type_info_of<Unlocked<T, POLICY_MUTEX>>().demangled_name();
 #endif
 template<typename T, typename POLICY_MUTEX>
-class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS PROTECTED T */ protected T, public POLICY_MUTEX
+class Unlocked : public POLICY_MUTEX,           // Initialize this first because T might access it during initialization.
 #if THREADSAFE_TRACK_UNLOCKED
-                 , public tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX>::name>
+                 public tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX>::name>,
 #endif
+  /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS PROTECTED T */ protected T
 {
   public:
 #if THREADSAFE_TRACK_UNLOCKED
@@ -391,11 +390,9 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
     friend void intrusive_ptr_release(Unlocked<T2, POLICY_MUTEX2> const* ptr);
 
     template<typename TrackedType, typename Tracker>
-    requires utils::is_specialization_of_v<Tracker, ObjectTracker>
     friend class TrackedObject;
 
-    template<typename TrackedType>
-    requires utils::is_specialization_of_v<TrackedType, UnlockedTrackedObject>
+    template<typename TrackedType, typename TrackedLockedType, typename POLICY_MUTEX2>
     friend class ObjectTracker;
 
   public:
@@ -408,7 +405,8 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
     // Also require that if a single argument is used that is not convertible to a crat const&:
     // in that case we want to use the constructor below.
     template<typename... ARGS>
-    requires (std::negation_v<std::is_base_of<Unlocked, std::decay_t<ARGS>>> && ...) &&
+    requires
+        (sizeof...(ARGS) == 0 || !std::is_base_of_v<Unlocked, std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>>) &&
         (sizeof...(ARGS) != 1 || !std::is_convertible_v<std::tuple_element_t<0, std::tuple<ARGS...>>, crat const&>)
     Unlocked(ARGS&&... args) : T(std::forward<ARGS>(args)...)
 #if THREADSAFE_DEBUG
@@ -426,32 +424,63 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
     {
     }
 
-    // Copying an Unlocked type is not thread-safe, use the above constructor instead.
-    Unlocked(Unlocked const&) = delete;
-
-    // Moving an Unlocked type will write-lock the orig.
-    // This uses the move constructor of T and creates a brand new mutex.
-    Unlocked(Unlocked&& orig) : T(std::move(static_cast<T&>(orig.do_wrlock())))
+    // Copy-constructor.
+    Unlocked(Unlocked const& orig) : T(orig.do_rdlock())
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
     {
+      orig.do_rdunlock();
+    }
+
+    enum no_locking_t { noLock };
+
+    // Moving an Unlocked type will write-lock the orig.
+    // This uses the move constructor of T and creates a brand new mutex.
+    template<typename... ARGS>
+    requires ((!std::is_base_of_v<Unlocked, std::decay_t<ARGS>> && !std::is_same_v<no_locking_t, std::decay_t<ARGS>>) && ...)
+    explicit Unlocked(Unlocked&& orig, ARGS&&... args) : T(std::move(static_cast<T&>(orig.do_wrlock())), std::forward<ARGS>(args)...)
+#if THREADSAFE_DEBUG
+      , m_ref(0)
+#endif // THREADSAFE_DEBUG
+    {
+#if THREADSAFE_DEBUG
+      // We just write-locked it; so there should be only a single access type.
+      // However, do_wrlock() doesn't increment m_ref; so it should be zero now.
+      ASSERT(orig.m_ref == 0);
+#endif
       orig.do_wrunlock();
     }
 
   protected:
-   // Used by the above constructor.
-   Unlocked& do_wrlock();
-   void do_wrunlock();
+    // Used by the above constructors.
+    Unlocked const& do_rdlock() const;
+    void do_rdunlock() const;
+    Unlocked& do_wrlock();
+    void do_wrunlock();
 
-   // This move-constructor can be used from a derived class, which then has to do the locking!
-   enum no_locking_t { NoLock };
-   Unlocked(Unlocked&& orig, no_locking_t) : T(std::move(static_cast<T&>(orig)))
+    // This copy-constructor can be used from a derived class, which then has to do the locking!
+    Unlocked(Unlocked const& orig, no_locking_t) : T(orig)
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
-   {
-   }
+    {
+    }
+
+    // This move-constructor can be used from a derived class, which then has to do the locking!
+    template<typename... ARGS>
+    requires (!std::is_base_of_v<Unlocked, std::decay_t<ARGS>> && ...)
+    explicit Unlocked(Unlocked&& orig, no_locking_t, ARGS&&... args) : T(std::move(static_cast<T&>(orig)), std::forward<ARGS>(args)...)
+#if THREADSAFE_DEBUG
+       , m_ref(0)
+#endif // THREADSAFE_DEBUG
+    {
+#if THREADSAFE_DEBUG
+      // It should just have been write-locked; so there can be only a single access type.
+      // However, do_wrlock() doesn't increment m_ref; so it should be zero now.
+      ASSERT(orig.m_ref == 0);
+#endif
+    }
 
   protected:
     // Only these may access the object (through ptr()).
@@ -1224,6 +1253,25 @@ OTAccess<UNLOCKED> const& wat_cast(OTConstAccess<UNLOCKED> const& access)
 }
 
 template<typename T, typename POLICY_MUTEX>
+Unlocked<T, POLICY_MUTEX> const& Unlocked<T, POLICY_MUTEX>::do_rdlock() /*threadsafe-*/const
+{
+  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().rdlock();
+  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().lock();
+  return *this;
+}
+
+template<typename T, typename POLICY_MUTEX>
+void Unlocked<T, POLICY_MUTEX>::do_rdunlock() /*threadsafe-*/const
+{
+  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().rdunlock();
+  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().unlock();
+}
+
+template<typename T, typename POLICY_MUTEX>
 Unlocked<T, POLICY_MUTEX>& Unlocked<T, POLICY_MUTEX>::do_wrlock()
 {
   if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
@@ -1346,9 +1394,9 @@ class ReadWrite : public ReadWriteAccess<RWMUTEX>
 
     template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
-    RWMUTEX m_read_write_mutex;
+    mutable RWMUTEX m_read_write_mutex;
 
-    RWMUTEX& mutex() { return m_read_write_mutex; }
+    RWMUTEX& mutex() /*threadsafe-*/const { return m_read_write_mutex; }
 
   public:
     void rd2wryield() { m_read_write_mutex.rd2wryield(); }
@@ -1433,9 +1481,9 @@ class Primitive : public PrimitiveAccess<MUTEX>
 
     template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
-    MUTEX m_primitive_mutex;
+    mutable MUTEX m_primitive_mutex;
 
-    MUTEX& mutex() { return m_primitive_mutex; }
+    MUTEX& mutex() /*threadsafe-*/const { return m_primitive_mutex; }
 };
 
 class OneThreadAccess

@@ -30,6 +30,10 @@ target_sources(threadsafe_ObjLib
     "AIReadWriteSpinLock.h"
     "ConditionVariable.h"
     "PointerStorage.h"
+    "ObjectTracker.h"
+    "TrackedObject.h"
+    "TrackedObject.inl.h"
+    "UnlockedTrackedObject.h"
 
     "threadsafe.h"
 )
