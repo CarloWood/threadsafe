@@ -1,5 +1,5 @@
-#ifndef THREADSAFE_TRACKED_OBJECT_H
-#error "TrackedObject.inl.h only needs to be included in TU's that include TrackedObject.h (directly or indirectly). Include it below other header files."
+#ifndef THREADSAFE_OBJECT_TRACKER_H
+#error "ObjectTracker.inl.h only needs to be included in TU's that include ObjectTracker.h (directly or indirectly). Include it below other header files."
 #endif
 
 // The second template parameter, Tracker, is incomplete while
@@ -18,7 +18,7 @@ TrackedObject<TrackedType, Tracker>::TrackedObject() :
   tracker_(std::make_shared<Tracker>(utils::Badge<TrackedObject>{}, *static_cast<TrackedType*>(this)))
 {
   static_assert(utils::is_complete_v<Tracker>,
-      "Include the header of Tracker before including threadsafe/TrackedObject.inl.h.");
+      "Include the header of Tracker before including threadsafe/ObjectTracker.inl.h.");
   static_assert(utils::is_derived_from_specialization_of_v<Tracker, ObjectTracker>,
       "Tracker must be derived from threadsafe::ObjectTracker<TrackedType>.");
 
