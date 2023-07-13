@@ -31,9 +31,7 @@ target_sources(threadsafe_ObjLib
     "ConditionVariable.h"
     "PointerStorage.h"
     "ObjectTracker.h"
-    "TrackedObject.h"
-    "TrackedObject.inl.h"
-    "UnlockedTrackedObject.h"
+    "ObjectTracker.inl.h"
 
     "threadsafe.h"
 )
