@@ -253,8 +253,9 @@ class SanityCheckArgsOfUnlockedTrackedObject
       "The first template parameter of UnlockedTrackedObject must already be complete, but isn't.");
   static_assert(utils::is_complete_v<POLICY_MUTEX>,
       "The second template parameter of UnlockedTrackedObject must already be complete, but isn't.");
+  // The following also fails if TrackedLockedType has two TrackedObject base classes, which is not allowed.
   static_assert(utils::is_derived_from_specialization_of_v<TrackedLockedType, TrackedObject>,
-      "The first template parameter of UnlockedTrackedObject must be derived from threadsafe::TrackedObject<TrackedType, Tracker>, but isn't.");
+      "The first template parameter of UnlockedTrackedObject must be derived from a single threadsafe::TrackedObject<TrackedType, Tracker>, but isn't.");
 };
 #endif
 
@@ -313,7 +314,7 @@ class UnlockedTrackedObject :
  public:
   // Give access to tracker.
   using Unlocked<TrackedLockedType, POLICY_MUTEX>::tracker;
-  using Unlocked<TrackedLockedType, POLICY_MUTEX>::operator std::weak_ptr<typename Unlocked<TrackedLockedType, POLICY_MUTEX>::tracker_type>;
+  using Unlocked<TrackedLockedType, POLICY_MUTEX>::operator std::weak_ptr<typename TrackedLockedType::tracker_type>;
 };
 
 } // namespace threadsafe
