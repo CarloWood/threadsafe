@@ -175,6 +175,66 @@ template<typename T, typename POLICY_MUTEX>
 requires std::derived_from<T, AIRefCount>
 void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX> const* ptr);
 
+// Helper class to support the copy-constructors of derived classes.
+template <typename DerivedClass>
+class LockFinalCopy
+{
+ private:
+  DerivedClass const* ptr_;
+  bool locked_;
+
+ public:
+  LockFinalCopy(DerivedClass const& orig) : ptr_(&orig), locked_(true)
+  {
+    ptr_->do_rdlock();
+  }
+
+  template<typename U>
+  LockFinalCopy(LockFinalCopy<U> const& orig) : ptr_(orig.operator->()), locked_(false)
+  {
+  }
+
+  ~LockFinalCopy()
+  {
+    if (locked_)
+      ptr_->do_rdunlock();
+  }
+
+  // Use pointer semantics to access the underlaying type DerivedClass.
+  DerivedClass const* operator->() const { return ptr_; }
+  DerivedClass const& operator*() const { return *ptr_; }
+};
+
+// Helper class to support the move-constructors of derived classes.
+template <typename DerivedClass>
+class LockFinalMove
+{
+ private:
+  DerivedClass* ptr_;
+  bool locked_;
+
+ public:
+  LockFinalMove(DerivedClass&& orig) : ptr_(&orig), locked_(true)
+  {
+    ptr_->do_wrlock();
+  }
+
+  template<typename U>
+  LockFinalMove(LockFinalMove<U>&& orig) : ptr_(orig.operator->()), locked_(false)
+  {
+  }
+
+  ~LockFinalMove()
+  {
+    if (locked_)
+      ptr_->do_wrunlock();
+  }
+
+  // Use pointer semantics to access the underlaying type DerivedClass.
+  DerivedClass* operator->() { return ptr_; }
+  DerivedClass&& operator*() { return std::move(*ptr_); }
+};
+
 /**
  * @brief A wrapper class for objects that need to be accessed by more than one thread, allowing concurrent readers.
  *
@@ -395,6 +455,12 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
     template<typename TrackedType, typename TrackedLockedType, typename POLICY_MUTEX2>
     friend class ObjectTracker;
 
+    template <typename DerivedClass>
+    friend class LockFinalCopy;
+
+    template <typename DerivedClass>
+    friend class LockFinalMove;
+
   public:
     // Allow arbitrary parameters to be passed for construction.
     //
@@ -406,7 +472,10 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
     // in that case we want to use the constructor below.
     template<typename... ARGS>
     requires
-        (sizeof...(ARGS) == 0 || !std::is_base_of_v<Unlocked, std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>>) &&
+        (sizeof...(ARGS) == 0 ||
+         (!std::is_base_of_v<Unlocked, std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>> &&
+          !std::is_convertible_v<std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>, LockFinalCopy<Unlocked>> &&
+          !std::is_convertible_v<std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>, LockFinalMove<Unlocked>>)) &&
         (sizeof...(ARGS) != 1 || !std::is_convertible_v<std::tuple_element_t<0, std::tuple<ARGS...>>, crat const&>)
     Unlocked(ARGS&&... args) : T(std::forward<ARGS>(args)...)
 #if THREADSAFE_DEBUG
@@ -425,21 +494,22 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
     }
 
     // Copy-constructor.
-    Unlocked(Unlocked const& orig) : T(orig.do_rdlock())
+    Unlocked(LockFinalCopy<Unlocked> orig) : T(*orig)
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
     {
-      orig.do_rdunlock();
     }
+    Unlocked(Unlocked const& orig) : Unlocked(LockFinalCopy<Unlocked>{orig}) { }
 
-    enum no_locking_t { noLock };
-
-    // Moving an Unlocked type will write-lock the orig.
+    // Moving an Unlocked type write-locks other as a result of creating the LockFinalMove object.
     // This uses the move constructor of T and creates a brand new mutex.
     template<typename... ARGS>
-    requires ((!std::is_base_of_v<Unlocked, std::decay_t<ARGS>> && !std::is_same_v<no_locking_t, std::decay_t<ARGS>>) && ...)
-    explicit Unlocked(Unlocked&& orig, ARGS&&... args) : T(std::move(static_cast<T&>(orig.do_wrlock())), std::forward<ARGS>(args)...)
+    requires ((!std::is_base_of_v<Unlocked, std::decay_t<ARGS>> &&
+          !std::is_convertible_v<std::decay_t<ARGS>, LockFinalCopy<Unlocked>> &&
+          !std::is_convertible_v<std::decay_t<ARGS>, LockFinalMove<Unlocked>>) && ...)
+    explicit Unlocked(LockFinalMove<Unlocked> other, ARGS&&... args) :
+      T(std::move(*other), std::forward<ARGS>(args)...)
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
@@ -447,10 +517,15 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
 #if THREADSAFE_DEBUG
       // We just write-locked it; so there should be only a single access type.
       // However, do_wrlock() doesn't increment m_ref; so it should be zero now.
-      ASSERT(orig.m_ref == 0);
+      ASSERT(other->m_ref == 0);
 #endif
-      orig.do_wrunlock();
     }
+
+    // Make sure that the normal move constructor also uses the above.
+    // Note that because the constructor that accepts a LockFinalCopy as first argument does not accept
+    // any other arguments, it is safe not to provide constructors that accept an rvalue reference plus
+    // additional arguments: that will just use the above constructor.
+    Unlocked(Unlocked&& other) : Unlocked(LockFinalMove<Unlocked>{std::move(other)}) { }
 
   protected:
     // Used by the above constructors.
@@ -458,29 +533,6 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
     void do_rdunlock() const;
     Unlocked& do_wrlock();
     void do_wrunlock();
-
-    // This copy-constructor can be used from a derived class, which then has to do the locking!
-    Unlocked(Unlocked const& orig, no_locking_t) : T(orig)
-#if THREADSAFE_DEBUG
-      , m_ref(0)
-#endif // THREADSAFE_DEBUG
-    {
-    }
-
-    // This move-constructor can be used from a derived class, which then has to do the locking!
-    template<typename... ARGS>
-    requires (!std::is_base_of_v<Unlocked, std::decay_t<ARGS>> && ...)
-    explicit Unlocked(Unlocked&& orig, no_locking_t, ARGS&&... args) : T(std::move(static_cast<T&>(orig)), std::forward<ARGS>(args)...)
-#if THREADSAFE_DEBUG
-       , m_ref(0)
-#endif // THREADSAFE_DEBUG
-    {
-#if THREADSAFE_DEBUG
-      // It should just have been write-locked; so there can be only a single access type.
-      // However, do_wrlock() doesn't increment m_ref; so it should be zero now.
-      ASSERT(orig.m_ref == 0);
-#endif
-    }
 
   protected:
     // Only these may access the object (through ptr()).

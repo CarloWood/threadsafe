@@ -221,7 +221,7 @@ class TrackedObject
   std::shared_ptr<Tracker> tracker_;
 
   TrackedObject();
-  TrackedObject(TrackedObject&& orig);
+  TrackedObject(TrackedObject&& other);
   ~TrackedObject();
 
  public:
@@ -279,37 +279,49 @@ class UnlockedTrackedObject :
   public Unlocked<TrackedLockedType, POLICY_MUTEX>
 {
  public:
-  // Provide all the normal constructors of Unlocked, except the move constructor which is overridden below.
-  using Unlocked<TrackedLockedType, POLICY_MUTEX>::Unlocked;
+  UnlockedTrackedObject(typename Unlocked<TrackedLockedType, POLICY_MUTEX>::crat const& unlocked_r) :
+    Unlocked<TrackedLockedType, POLICY_MUTEX>(unlocked_r) { }
 
-  // Move constructor with tracking support: if this (final) object is moved then first
-  // the mutex of orig is write locked, then that object is "moved" (moving the underlaying
+  // Provide all the normal constructors of Unlocked, except the move constructor which is overridden below.
+  template<typename... ARGS>
+  requires
+      (sizeof...(ARGS) == 0 ||
+       (!std::is_base_of_v<Unlocked<TrackedLockedType, POLICY_MUTEX>, std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>> &&
+        !std::is_convertible_v<std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>,
+            LockFinalCopy<Unlocked<TrackedLockedType, POLICY_MUTEX>>> &&
+        !std::is_convertible_v<std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>,
+            LockFinalMove<Unlocked<TrackedLockedType, POLICY_MUTEX>>>)) &&
+      (sizeof...(ARGS) != 1 || !std::is_convertible_v<std::tuple_element_t<0, std::tuple<ARGS...>>,
+       typename Unlocked<TrackedLockedType, POLICY_MUTEX>::crat const&>)
+  UnlockedTrackedObject(ARGS&&... args) :
+    Unlocked<TrackedLockedType, POLICY_MUTEX>(std::forward<ARGS>(args)...) { }
+
+  UnlockedTrackedObject(LockFinalCopy<UnlockedTrackedObject> orig) : Unlocked<TrackedLockedType, POLICY_MUTEX>(orig) { }
+  // Make sure that the normal copy constructor also uses the above.
+  UnlockedTrackedObject(UnlockedTrackedObject const& orig) : UnlockedTrackedObject(LockFinalCopy<UnlockedTrackedObject>{orig}) { }
+
+  // Move constructor with tracking support: if the final object is moved then first
+  // the mutex of other is write locked, then that object is "moved" (moving the underlaying
   // data object, but creating a new policy mutex). This also updates the pointer of the
-  // tracker that points to that data object. Finally, in the body of this constructor,
-  // the tracker is updated to point to the newly created mutex after which orig is unlocked.
-  //
-  // If this is not the most derived class then do not use this constructor!
+  // tracker that points to that data object. Finally, in the body of the constructor,
+  // the tracker is updated to point to the newly created mutex. At the end of the constructor
+  // of the final object, other is unlocked.
   template<typename... ARGS>
   requires ((!std::is_base_of_v<Unlocked<TrackedLockedType, POLICY_MUTEX>, std::decay_t<ARGS>> &&
-             !std::is_same_v<typename Unlocked<TrackedLockedType, POLICY_MUTEX>::no_locking_t, std::decay_t<ARGS>>) && ... )
-  explicit UnlockedTrackedObject(UnlockedTrackedObject&& orig, ARGS&&... args) :
-    Unlocked<TrackedLockedType, POLICY_MUTEX>(std::move(orig.do_wrlock()), this->noLock, std::forward<ARGS>(args)...)
+        !std::is_convertible_v<std::decay_t<ARGS>, LockFinalCopy<Unlocked<TrackedLockedType, POLICY_MUTEX>>> &&
+        !std::is_convertible_v<std::decay_t<ARGS>, LockFinalMove<Unlocked<TrackedLockedType, POLICY_MUTEX>>>) && ...)
+  explicit UnlockedTrackedObject(LockFinalMove<UnlockedTrackedObject> other, ARGS&&... args) :
+    Unlocked<TrackedLockedType, POLICY_MUTEX>(std::move(other), std::forward<ARGS>(args)...)
   {
     auto& mutex = this->mutex();
     this->tracker_->update_mutex_pointer(&mutex);
-    orig.do_wrunlock();
   }
 
- protected:
-  // This move-constructor can be used from a derived class, which then has to do the locking!
-  template<typename... ARGS>
-  requires (!std::is_base_of_v<Unlocked<TrackedLockedType, POLICY_MUTEX>, std::decay_t<ARGS>> && ...)
-  explicit UnlockedTrackedObject(UnlockedTrackedObject&& orig, typename Unlocked<TrackedLockedType, POLICY_MUTEX>::no_locking_t nolock, ARGS&&... args) :
-    Unlocked<TrackedLockedType, POLICY_MUTEX>(std::move(orig), nolock, std::forward<ARGS>(args)...)
-  {
-    auto& mutex = this->mutex();
-    this->tracker_->update_mutex_pointer(&mutex);
-  }
+  // Make sure that the normal move constructor also uses the above.
+  // Note that because the constructor that accepts a LockFinalCopy as first argument does not accept
+  // any other arguments, it is safe not to provide constructors that accept an rvalue reference plus
+  // additional arguments: that will just use the above constructor.
+  UnlockedTrackedObject(UnlockedTrackedObject&& other) : UnlockedTrackedObject(LockFinalMove<UnlockedTrackedObject>{std::move(other)}) { }
 
  public:
   // Give access to tracker.
