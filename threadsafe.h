@@ -509,7 +509,7 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
           !std::is_convertible_v<std::decay_t<ARGS>, LockFinalCopy<Unlocked>> &&
           !std::is_convertible_v<std::decay_t<ARGS>, LockFinalMove<Unlocked>>) && ...)
     explicit Unlocked(LockFinalMove<Unlocked> other, ARGS&&... args) :
-      T(std::move(*other), std::forward<ARGS>(args)...)
+      T(static_cast<T&&>(*other), std::forward<ARGS>(args)...)
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
