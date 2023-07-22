@@ -175,6 +175,13 @@ template<typename T, typename POLICY_MUTEX>
 requires std::derived_from<T, AIRefCount>
 void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX> const* ptr);
 
+// Returns true iff T is an lvalue-reference, or a const rvalue-reference, to (a class derived from) Base.
+template<typename T, typename Base>
+concept ConceptLvalue =
+  std::derived_from<std::remove_cvref_t<T>, Base> &&
+  (std::is_reference_v<T> ||                            // is `Base const&`
+   (!std::is_reference_v<T> && std::is_const_v<T>));    // or is `Base const&&`
+
 // Helper class to support the copy-constructors of derived classes.
 template <typename DerivedClass>
 class LockFinalCopy
@@ -184,7 +191,7 @@ class LockFinalCopy
   bool locked_;
 
  public:
-  LockFinalCopy(DerivedClass const& orig) : ptr_(&orig), locked_(true)
+  LockFinalCopy(ConceptLvalue<DerivedClass> auto&& orig) : ptr_(&orig), locked_(true)
   {
     ptr_->do_rdlock();
   }
@@ -205,6 +212,12 @@ class LockFinalCopy
   DerivedClass const& operator*() const { return *ptr_; }
 };
 
+// Returns true iff T is an non-const rvalue-reference to (a class derived from) Base.
+template<typename T, typename Base>
+concept ConceptRvalue =
+  std::derived_from<std::remove_cvref_t<T>, Base> &&
+  !std::is_reference_v<T> && !std::is_const_v<T>;       // is `Base&&`
+
 // Helper class to support the move-constructors of derived classes.
 template <typename DerivedClass>
 class LockFinalMove
@@ -214,7 +227,7 @@ class LockFinalMove
   bool locked_;
 
  public:
-  LockFinalMove(DerivedClass&& orig) : ptr_(&orig), locked_(true)
+  LockFinalMove(ConceptRvalue<DerivedClass> auto&& orig) : ptr_(&orig), locked_(true)
   {
     ptr_->do_wrlock();
   }
