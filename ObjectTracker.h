@@ -82,6 +82,9 @@ class Node : public threadsafe::UnlockedTrackedObject<locked_Node, threadsafe::p
 };
 #endif
 
+// Include this in every .cxx that uses ObjectTracker.h somehow!
+#include "ObjectTracker.inl.h"
+
 int main()
 {
   // Now one can construct a Node object:

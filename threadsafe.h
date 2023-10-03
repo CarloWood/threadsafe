@@ -1355,8 +1355,7 @@ void Unlocked<T, POLICY_MUTEX>::do_wrunlock()
     this->mutex().unlock();
 }
 
-namespace policy
-{
+namespace policy {
 
 template<typename T> struct helper { static constexpr bool value = false; };
 template<typename UNLOCKED> struct unsupported_w2rCarry
