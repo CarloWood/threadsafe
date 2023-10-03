@@ -143,7 +143,7 @@
 
 #ifdef CWDEBUG
 // Set this to 1 to print tracking information about Unlocked and UnlockedBase to dc::tracked.
-#define THREADSAFE_TRACK_UNLOCKED 0
+#define THREADSAFE_TRACK_UNLOCKED 1
 #if THREADSAFE_TRACK_UNLOCKED
 #include <cwds/tracked.h>
 #include <libcwd/type_info.h>
@@ -161,12 +161,10 @@ class Unlocked;
 template<typename TrackedLockedType, typename POLICY_MUTEX>
 class UnlockedTrackedObject;
 
-template<typename TrackedType>
-requires utils::is_specialization_of_v<TrackedType, UnlockedTrackedObject>
+template<typename TrackedType, typename TrackedLockedType, typename POLICY_MUTEX>
 class ObjectTracker;
 
 template<typename TrackedType, typename Tracker>
-requires utils::is_specialization_of_v<Tracker, ObjectTracker>
 class TrackedObject;
 
 template<typename T, typename POLICY_MUTEX>
@@ -176,6 +174,79 @@ void intrusive_ptr_add_ref(Unlocked<T, POLICY_MUTEX> const* ptr);
 template<typename T, typename POLICY_MUTEX>
 requires std::derived_from<T, AIRefCount>
 void intrusive_ptr_release(Unlocked<T, POLICY_MUTEX> const* ptr);
+
+// Returns true iff T is an lvalue-reference, or a const rvalue-reference, to (a class derived from) Base.
+template<typename T, typename Base>
+concept ConceptLvalue =
+  std::derived_from<std::remove_cvref_t<T>, Base> &&
+  (std::is_reference_v<T> ||                            // is `Base const&`
+   (!std::is_reference_v<T> && std::is_const_v<T>));    // or is `Base const&&`
+
+// Helper class to support the copy-constructors of derived classes.
+template <typename DerivedClass>
+class LockFinalCopy
+{
+ private:
+  DerivedClass const* ptr_;
+  bool locked_;
+
+ public:
+  LockFinalCopy(ConceptLvalue<DerivedClass> auto&& orig) : ptr_(&orig), locked_(true)
+  {
+    ptr_->do_rdlock();
+  }
+
+  template<typename U>
+  LockFinalCopy(LockFinalCopy<U> const& orig) : ptr_(orig.operator->()), locked_(false)
+  {
+  }
+
+  ~LockFinalCopy()
+  {
+    if (locked_)
+      ptr_->do_rdunlock();
+  }
+
+  // Use pointer semantics to access the underlaying type DerivedClass.
+  DerivedClass const* operator->() const { return ptr_; }
+  DerivedClass const& operator*() const { return *ptr_; }
+};
+
+// Returns true iff T is an non-const rvalue-reference to (a class derived from) Base.
+template<typename T, typename Base>
+concept ConceptRvalue =
+  std::derived_from<std::remove_cvref_t<T>, Base> &&
+  !std::is_reference_v<T> && !std::is_const_v<T>;       // is `Base&&`
+
+// Helper class to support the move-constructors of derived classes.
+template <typename DerivedClass>
+class LockFinalMove
+{
+ private:
+  DerivedClass* ptr_;
+  bool locked_;
+
+ public:
+  LockFinalMove(ConceptRvalue<DerivedClass> auto&& orig) : ptr_(&orig), locked_(true)
+  {
+    ptr_->do_wrlock();
+  }
+
+  template<typename U>
+  LockFinalMove(LockFinalMove<U>&& orig) : ptr_(orig.operator->()), locked_(false)
+  {
+  }
+
+  ~LockFinalMove()
+  {
+    if (locked_)
+      ptr_->do_wrunlock();
+  }
+
+  // Use pointer semantics to access the underlaying type DerivedClass.
+  DerivedClass* operator->() { return ptr_; }
+  DerivedClass&& operator*() { return std::move(*ptr_); }
+};
 
 /**
  * @brief A wrapper class for objects that need to be accessed by more than one thread, allowing concurrent readers.
@@ -358,10 +429,11 @@ char const* NameUnlocked<T, POLICY_MUTEX>::name =
   libcwd::type_info_of<Unlocked<T, POLICY_MUTEX>>().demangled_name();
 #endif
 template<typename T, typename POLICY_MUTEX>
-class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS PROTECTED T */ protected T, public POLICY_MUTEX
+class Unlocked : public POLICY_MUTEX,           // Initialize this first because T might access it during initialization.
 #if THREADSAFE_TRACK_UNLOCKED
-                 , public tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX>::name>
+                 public tracked::Tracked<&NameUnlocked<T, POLICY_MUTEX>::name>,
 #endif
+  /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS PROTECTED T */ protected T
 {
   public:
 #if THREADSAFE_TRACK_UNLOCKED
@@ -391,12 +463,16 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
     friend void intrusive_ptr_release(Unlocked<T2, POLICY_MUTEX2> const* ptr);
 
     template<typename TrackedType, typename Tracker>
-    requires utils::is_specialization_of_v<Tracker, ObjectTracker>
     friend class TrackedObject;
 
-    template<typename TrackedType>
-    requires utils::is_specialization_of_v<TrackedType, UnlockedTrackedObject>
+    template<typename TrackedType, typename TrackedLockedType, typename POLICY_MUTEX2>
     friend class ObjectTracker;
+
+    template <typename DerivedClass>
+    friend class LockFinalCopy;
+
+    template <typename DerivedClass>
+    friend class LockFinalMove;
 
   public:
     // Allow arbitrary parameters to be passed for construction.
@@ -408,7 +484,11 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
     // Also require that if a single argument is used that is not convertible to a crat const&:
     // in that case we want to use the constructor below.
     template<typename... ARGS>
-    requires (std::negation_v<std::is_base_of<Unlocked, std::decay_t<ARGS>>> && ...) &&
+    requires
+        (sizeof...(ARGS) == 0 ||
+         (!std::is_base_of_v<Unlocked, std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>> &&
+          !std::is_convertible_v<std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>, LockFinalCopy<Unlocked>> &&
+          !std::is_convertible_v<std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>, LockFinalMove<Unlocked>>)) &&
         (sizeof...(ARGS) != 1 || !std::is_convertible_v<std::tuple_element_t<0, std::tuple<ARGS...>>, crat const&>)
     Unlocked(ARGS&&... args) : T(std::forward<ARGS>(args)...)
 #if THREADSAFE_DEBUG
@@ -426,32 +506,46 @@ class Unlocked : /* YOU NEED TO CREATE AN ACCESS TYPE TO ACCESS MEMBERS OF THIS 
     {
     }
 
-    // Copying an Unlocked type is not thread-safe, use the above constructor instead.
-    Unlocked(Unlocked const&) = delete;
-
-    // Moving an Unlocked type will write-lock the orig.
-    // This uses the move constructor of T and creates a brand new mutex.
-    Unlocked(Unlocked&& orig) : T(std::move(static_cast<T&>(orig.do_wrlock())))
+    // Copy-constructor.
+    Unlocked(LockFinalCopy<Unlocked> orig) : T(*orig)
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
     {
-      orig.do_wrunlock();
     }
+    Unlocked(Unlocked const& orig) : Unlocked(LockFinalCopy<Unlocked>{orig}) { }
 
-  protected:
-   // Used by the above constructor.
-   Unlocked& do_wrlock();
-   void do_wrunlock();
-
-   // This move-constructor can be used from a derived class, which then has to do the locking!
-   enum no_locking_t { NoLock };
-   Unlocked(Unlocked&& orig, no_locking_t) : T(std::move(static_cast<T&>(orig)))
+    // Moving an Unlocked type write-locks other as a result of creating the LockFinalMove object.
+    // This uses the move constructor of T and creates a brand new mutex.
+    template<typename... ARGS>
+    requires ((!std::is_base_of_v<Unlocked, std::decay_t<ARGS>> &&
+          !std::is_convertible_v<std::decay_t<ARGS>, LockFinalCopy<Unlocked>> &&
+          !std::is_convertible_v<std::decay_t<ARGS>, LockFinalMove<Unlocked>>) && ...)
+    explicit Unlocked(LockFinalMove<Unlocked> other, ARGS&&... args) :
+      T(static_cast<T&&>(*other), std::forward<ARGS>(args)...)
 #if THREADSAFE_DEBUG
       , m_ref(0)
 #endif // THREADSAFE_DEBUG
-   {
-   }
+    {
+#if THREADSAFE_DEBUG
+      // We just write-locked it; so there should be only a single access type.
+      // However, do_wrlock() doesn't increment m_ref; so it should be zero now.
+      ASSERT(other->m_ref == 0);
+#endif
+    }
+
+    // Make sure that the normal move constructor also uses the above.
+    // Note that because the constructor that accepts a LockFinalCopy as first argument does not accept
+    // any other arguments, it is safe not to provide constructors that accept an rvalue reference plus
+    // additional arguments: that will just use the above constructor.
+    Unlocked(Unlocked&& other) : Unlocked(LockFinalMove<Unlocked>{std::move(other)}) { }
+
+  protected:
+    // Used by the above constructors.
+    Unlocked const& do_rdlock() const;
+    void do_rdunlock() const;
+    Unlocked& do_wrlock();
+    void do_wrunlock();
 
   protected:
     // Only these may access the object (through ptr()).
@@ -1224,6 +1318,25 @@ OTAccess<UNLOCKED> const& wat_cast(OTConstAccess<UNLOCKED> const& access)
 }
 
 template<typename T, typename POLICY_MUTEX>
+Unlocked<T, POLICY_MUTEX> const& Unlocked<T, POLICY_MUTEX>::do_rdlock() /*threadsafe-*/const
+{
+  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().rdlock();
+  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().lock();
+  return *this;
+}
+
+template<typename T, typename POLICY_MUTEX>
+void Unlocked<T, POLICY_MUTEX>::do_rdunlock() /*threadsafe-*/const
+{
+  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().rdunlock();
+  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+    this->mutex().unlock();
+}
+
+template<typename T, typename POLICY_MUTEX>
 Unlocked<T, POLICY_MUTEX>& Unlocked<T, POLICY_MUTEX>::do_wrlock()
 {
   if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
@@ -1346,9 +1459,9 @@ class ReadWrite : public ReadWriteAccess<RWMUTEX>
 
     template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
-    RWMUTEX m_read_write_mutex;
+    mutable RWMUTEX m_read_write_mutex;
 
-    RWMUTEX& mutex() { return m_read_write_mutex; }
+    RWMUTEX& mutex() /*threadsafe-*/const { return m_read_write_mutex; }
 
   public:
     void rd2wryield() { m_read_write_mutex.rd2wryield(); }
@@ -1433,9 +1546,9 @@ class Primitive : public PrimitiveAccess<MUTEX>
 
     template<typename BASE, typename POLICY_MUTEX> friend class ::threadsafe::UnlockedBase;
 
-    MUTEX m_primitive_mutex;
+    mutable MUTEX m_primitive_mutex;
 
-    MUTEX& mutex() { return m_primitive_mutex; }
+    MUTEX& mutex() /*threadsafe-*/const { return m_primitive_mutex; }
 };
 
 class OneThreadAccess

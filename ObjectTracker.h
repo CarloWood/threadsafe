@@ -1,11 +1,17 @@
 #pragma once
 
-#include "AIReadWriteSpinLock.h"
 #include "threadsafe.h"
+#include "AIReadWriteSpinLock.h"
 #include "utils/Badge.h"
+#include "utils/is_complete.h"
+#include <type_traits>
+#include <utility>
 #include <memory>
 #include <atomic>
 #include "debug.h"
+
+// Let ObjectTracker.inl.h know that it is needed.
+#define THREADSAFE_OBJECT_TRACKER_H
 
 // threadsafe::ObjectTracker
 //
@@ -21,20 +27,39 @@
 // Forward declare the object that should be tracked and protected against concurrent access.
 class locked_Node;
 
-// Define the Unlocked version (using the desired locking policy).
+//-----------------------------------------------------------------------------
+
+#if UNLOCKED_TYPE_IS_TYPEDEF
+// 1) If Node is a typedef, then it has to be defined next:
+// Define the Unlocked version (using the desired locking policy):
 using Node = threadsafe::UnlockedTrackedObject<locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
+#else
+// 2) otherwise, forward declare Node.
+class Node;
+#endif
 
-// Define a corresponding tracker class.
-using NodeTracker = threadsafe::ObjectTracker<Node>;
-
-// Optionally derive from ObjectTracker.
-class NodeTracker : public threadsafe::ObjectTracker<Node>
+// Then define a corresponding tracker class.
+#if TRACKER_IS_TYPEDEF
+//   Either also as a typedef:
+using NodeTracker = threadsafe::ObjectTracker<Node, locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
+#else
+//   Or derived from ObjectTracker:
+//
+//   Note: if you run into the compile error 'incomplete locked_Node' or UnlockedTrackedObject<locked_Node, ...> during the
+//   instantiation of the destructor of this NodeTracker class, then move its constructors and destructor out of the header
+//   (to a .cxx file).
+class NodeTracker : public threadsafe::ObjectTracker<Node, locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>
 {
  public:
-  // The argument must be a Node const& which is passed to ObjectTracker base class.
-  NodeTracker(Node const& tracked) : threadsafe::ObjectTracker<Node>(tracked) { }
+  // The arguments must be a Badge and a Node const& which is passed to ObjectTracker base class.
+  NodeTracker(utils::Badge<threadsafe::TrackedObject<Node, NodeTracker>>, Node const& tracked) :
+    threadsafe::ObjectTracker<Node, locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>(tracked) { }
 };
+#endif
 
+// Finally define the locked type (the type that can only be accessed through an
+// access object, like NodeTracker::rat or NodeTracker::wat).
+//
 // The to-be-tracked object must be derived from threadsafe::TrackedObject,
 // passing both, the Unlocked type as well as the tracker class.
 class locked_Node : public threadsafe::TrackedObject<Node, NodeTracker>
@@ -48,6 +73,15 @@ class locked_Node : public threadsafe::TrackedObject<Node, NodeTracker>
   std::string const& s() const { return s_; }
 };
 
+#if !UNLOCKED_TYPE_IS_TYPEDEF
+// If Node is not a typedef (2) then define Node after locked_Node:
+class Node : public threadsafe::UnlockedTrackedObject<locked_Node, threadsafe::policy::ReadWrite<AIReadWriteMutex>>
+{
+ public:
+  using threadsafe::ObjectTracker<Node, locked_Node, threadsafe::policy::Primitive<std::mutex>>::ObjectTracker;
+};
+#endif
+
 int main()
 {
   // Now one can construct a Node object:
@@ -55,54 +89,15 @@ int main()
   // And obtain the tracker at any moment (also after it was moved):
   std::weak_ptr<NodeTracker> node_tracker = node;
 
-  // Even if node is moved,
+  // And then even if node is moved,
   Node node2(std::move(node));
-  // node_tracker will point to node2:
+  // node_tracker will point to the correct instance (node2 in this case):
   auto node_r{node_tracker.lock()->tracked_rat()};
   std::cout << "s = " << node_r->s() << std::endl;  // Prints "s = hello".
 }
 #endif // EXAMPLE_CODE
 
 namespace threadsafe {
-
-// UnlockedTrackedObject
-//
-// The type of an unlocked tracked object: this type wraps TrackedLockedType
-// protecting it against concurrent access using POLICY_MUTEX, just like Unlocked
-// and UnlockedBase, but simultaneously supports tracking (TrackedLockedType
-// must be derived from TrackedObject<...> which creates the tracker and
-// makes a reference to the that tracker available through the `tracker()`
-// member function).
-//
-// Note that you can not derive from UnlockedTrackedObject (that is why it is
-// marked 'final'): allowing that would mean that the mutex that is locked
-// by the call to orig.do_wrlock() is not locked during the move constructor
-// of the derived class.
-//
-template<typename TrackedLockedType, typename POLICY_MUTEX>
-class UnlockedTrackedObject final : public Unlocked<TrackedLockedType, POLICY_MUTEX>
-{
- public:
-  // Provide all the normal constructors of Unlocked, except the move constructor which is overridden below.
-  using Unlocked<TrackedLockedType, POLICY_MUTEX>::Unlocked;
-
-  // Move constructor with tracking support: if this (final) object is moved then first
-  // the mutex of orig is write locked, then that object is "moved" (moving the underlaying
-  // data object, but creating a new policy mutex). This also updates the pointer of the
-  // tracker that points to that data object. Finally, in the body of this constructor,
-  // the tracker is updated to point to the newly created mutex after which orig is unlocked.
-  UnlockedTrackedObject(UnlockedTrackedObject&& orig) :
-    Unlocked<TrackedLockedType, POLICY_MUTEX>(std::move(orig.do_wrlock()), this->NoLock)
-  {
-    auto& mutex = this->mutex();
-    this->tracker_->update_mutex_pointer(&mutex);
-    orig.do_wrunlock();
-  }
-
-  // Give access to tracker.
-  using Unlocked<TrackedLockedType, POLICY_MUTEX>::tracker;
-  using Unlocked<TrackedLockedType, POLICY_MUTEX>::operator std::weak_ptr<typename Unlocked<TrackedLockedType, POLICY_MUTEX>::tracker_type>;
-};
 
 // ObjectTracker
 //
@@ -117,14 +112,19 @@ class UnlockedTrackedObject final : public Unlocked<TrackedLockedType, POLICY_MU
 // Note that it is allowed to derive from ObjectTracker, but a typical usage
 // will be to use it as-is for your tracker type.
 //
-template<typename TrackedType>
-requires utils::is_specialization_of_v<TrackedType, UnlockedTrackedObject>  // The tracked type must be an UnlockedTrackedObject.
+template<typename TrackedType, typename TrackedLockedType, typename POLICY_MUTEX>
 class ObjectTracker
 {
  public:
   using tracked_type = TrackedType;
-  using tracked_locked_type = typename tracked_type::data_type;
-  using policy_type = typename tracked_type::policy_type;
+  using tracked_locked_type = TrackedLockedType;
+  using policy_type = POLICY_MUTEX;
+  using unlocked_type = UnlockedBase<tracked_locked_type, policy_type>;
+
+  using crat = typename unlocked_type::crat;
+  using rat = typename unlocked_type::rat;
+  using wat = typename unlocked_type::wat;
+  using w2rCarry = typename unlocked_type::w2rCarry;
 
  private:
   // This class is used to get access to the protected m_base.
@@ -140,15 +140,12 @@ class ObjectTracker
 
     void update_mutex_pointer(auto* mutex_ptr)
     {
-      this->m_read_write_mutex_ptr = mutex_ptr;
+      if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<tracked_type, policy_type>>>)
+        this->m_read_write_mutex_ptr = mutex_ptr;
+      else if constexpr (std::is_same_v<wat, Access<Unlocked<tracked_type, policy_type>>>)
+        this->m_primitive_mutex_ptr = mutex_ptr;
     }
   };
-
- public:
-  using crat = typename UnlockedBaseTrackedObject::crat;
-  using rat = typename UnlockedBaseTrackedObject::rat;
-  using wat = typename UnlockedBaseTrackedObject::wat;
-  using w2rCarry = typename UnlockedBaseTrackedObject::w2rCarry;
 
  protected:
   using tracked_unlocked_ptr_type = Unlocked<UnlockedBaseTrackedObject, policy::ReadWrite<AIReadWriteSpinLock>>;
@@ -159,12 +156,16 @@ class ObjectTracker
 
  public:
   // Construct a new ObjectTracker that tracks tracked_unlocked.
-  ObjectTracker(utils::Badge<TrackedObject<tracked_type, ObjectTracker>>, tracked_type const& tracked_unlocked) :
+  template<typename TrackerType>
+  ObjectTracker(utils::Badge<TrackedObject<tracked_type, TrackerType>>, tracked_type const& tracked_unlocked) :
     tracked_unlocked_ptr_(tracked_unlocked) { }
 
   // This is called when the object is moved in memory, see below.
-  void set_tracked_unlocked(utils::Badge<TrackedObject<tracked_type, ObjectTracker>>, tracked_type* tracked_unlocked_ptr)
+  template<typename TrackerType>
+  void set_tracked_unlocked(utils::Badge<TrackedObject<tracked_type, TrackerType>>, tracked_type* tracked_unlocked_ptr)
   {
+    // This function should not be called while the tracker is being constructed!
+    ASSERT(debug_initialized_);
     typename tracked_unlocked_ptr_type::wat tracked_unlocked_ptr_w(tracked_unlocked_ptr_);
     // This is called while the mutex of the tracked_type is locked.
     tracked_unlocked_ptr_w->set_tracked_unlocked(tracked_unlocked_ptr);
@@ -172,6 +173,8 @@ class ObjectTracker
 
   void update_mutex_pointer(auto* mutex_ptr)
   {
+    // This function should not be called while the tracker is being constructed!
+    ASSERT(debug_initialized_);
     typename tracked_unlocked_ptr_type::wat tracked_unlocked_ptr_w(tracked_unlocked_ptr_);
     tracked_unlocked_ptr_w->update_mutex_pointer(mutex_ptr);
   }
@@ -179,24 +182,35 @@ class ObjectTracker
   // Accessors.
   rat tracked_rat()
   {
+    // This function should not be called while the tracker is being constructed!
+    ASSERT(debug_initialized_);
     typename tracked_unlocked_ptr_type::rat tracked_unlocked_ptr_r(tracked_unlocked_ptr_);
     // rat wants to be explicitly constructed from a non-const reference.
     return rat{const_cast<UnlockedBaseTrackedObject&>(*tracked_unlocked_ptr_r)};
   }
   wat tracked_wat()
   {
+    // This function should not be called while the tracker is being constructed!
+    ASSERT(debug_initialized_);
     typename tracked_unlocked_ptr_type::rat tracked_unlocked_ptr_r(tracked_unlocked_ptr_);
     return wat{const_cast<UnlockedBaseTrackedObject&>(*tracked_unlocked_ptr_r)};
   }
+
+#if CW_DEBUG
+ private:
+  bool debug_initialized_ = false;
+
+ public:
+  void set_is_initialized() { debug_initialized_ = true; }
+#endif
 };
 
 // TrackedObject
 //
 // Base class of the unlocked data type.
-// The template parameters must be the two types defined above (UnlockedTrackedObject and ObjectTracker respectively).
+// The template parameters must be (derived from) UnlockedTrackedObject and ObjectTracker respectively.
 //
 template<typename TrackedType, typename Tracker>
-requires utils::is_specialization_of_v<Tracker, ObjectTracker>
 class TrackedObject
 {
  public:
@@ -206,21 +220,9 @@ class TrackedObject
  protected:
   std::shared_ptr<Tracker> tracker_;
 
-  TrackedObject() : tracker_(std::make_shared<Tracker>(utils::Badge<TrackedObject>{}, *static_cast<tracked_type*>(this)))
-  {
-  }
-
-  TrackedObject(TrackedObject&& orig) : tracker_(std::move(orig.tracker_))
-  {
-    // The orig object must be write-locked (blocking all concurrent access)!
-    tracker_->set_tracked_unlocked({}, static_cast<typename Tracker::tracked_type*>(this));
-  }
-
-  ~TrackedObject()
-  {
-    if (tracker_) // This is null if the tracked object was moved.
-      tracker_->set_tracked_unlocked({}, nullptr);
-  }
+  TrackedObject();
+  TrackedObject(TrackedObject&& other);
+  ~TrackedObject();
 
  public:
   // Accessor for the Tracker object. Make sure to keep the TrackedObject alive while using this.
@@ -241,6 +243,90 @@ class TrackedObject
 
   // Automatic conversion to a weak_ptr.
   operator std::weak_ptr<Tracker>() const { return tracker_; }
+};
+
+#ifdef CWDEBUG
+template<typename TrackedLockedType, typename POLICY_MUTEX>
+class SanityCheckArgsOfUnlockedTrackedObject
+{
+  static_assert(utils::is_complete_v<TrackedLockedType>,
+      "The first template parameter of UnlockedTrackedObject must already be complete, but isn't.");
+  static_assert(utils::is_complete_v<POLICY_MUTEX>,
+      "The second template parameter of UnlockedTrackedObject must already be complete, but isn't.");
+  // The following also fails if TrackedLockedType has two TrackedObject base classes, which is not allowed.
+  static_assert(utils::is_derived_from_specialization_of_v<TrackedLockedType, TrackedObject>,
+      "The first template parameter of UnlockedTrackedObject must be derived from a single threadsafe::TrackedObject<TrackedType, Tracker>, but isn't.");
+};
+#endif
+
+// UnlockedTrackedObject
+//
+// The type of an unlocked tracked object: this type wraps TrackedLockedType
+// protecting it against concurrent access using POLICY_MUTEX, just like Unlocked
+// and UnlockedBase, but simultaneously supports tracking (TrackedLockedType
+// must be derived from TrackedObject<...> which creates the tracker and
+// makes a reference to the that tracker available through the `tracker()`
+// member function).
+//
+// Note: both TrackedLockedType and POLICY_MUTEX must be complete at this point
+// because the base class Unlocked<TrackedLockedType, POLICY_MUTEX> derives from
+// both.
+template<typename TrackedLockedType, typename POLICY_MUTEX>
+class UnlockedTrackedObject :
+#ifdef CWDEBUG
+  SanityCheckArgsOfUnlockedTrackedObject<TrackedLockedType, POLICY_MUTEX>,
+#endif
+  public Unlocked<TrackedLockedType, POLICY_MUTEX>
+{
+ public:
+  UnlockedTrackedObject(typename Unlocked<TrackedLockedType, POLICY_MUTEX>::crat const& unlocked_r) :
+    Unlocked<TrackedLockedType, POLICY_MUTEX>(unlocked_r) { }
+
+  // Provide all the normal constructors of Unlocked, except the move constructor which is overridden below.
+  template<typename... ARGS>
+  requires
+      (sizeof...(ARGS) == 0 ||
+       (!std::is_base_of_v<Unlocked<TrackedLockedType, POLICY_MUTEX>, std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>> &&
+        !std::is_convertible_v<std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>,
+            LockFinalCopy<Unlocked<TrackedLockedType, POLICY_MUTEX>>> &&
+        !std::is_convertible_v<std::decay_t<std::tuple_element_t<0, std::tuple<ARGS...>>>,
+            LockFinalMove<Unlocked<TrackedLockedType, POLICY_MUTEX>>>)) &&
+      (sizeof...(ARGS) != 1 || !std::is_convertible_v<std::tuple_element_t<0, std::tuple<ARGS...>>,
+       typename Unlocked<TrackedLockedType, POLICY_MUTEX>::crat const&>)
+  UnlockedTrackedObject(ARGS&&... args) :
+    Unlocked<TrackedLockedType, POLICY_MUTEX>(std::forward<ARGS>(args)...) { }
+
+  UnlockedTrackedObject(LockFinalCopy<UnlockedTrackedObject> orig) : Unlocked<TrackedLockedType, POLICY_MUTEX>(orig) { }
+  // Make sure that the normal copy constructor also uses the above.
+  UnlockedTrackedObject(UnlockedTrackedObject const& orig) : UnlockedTrackedObject(LockFinalCopy<UnlockedTrackedObject>{orig}) { }
+
+  // Move constructor with tracking support: if the final object is moved then first
+  // the mutex of other is write locked, then that object is "moved" (moving the underlaying
+  // data object, but creating a new policy mutex). This also updates the pointer of the
+  // tracker that points to that data object. Finally, in the body of the constructor,
+  // the tracker is updated to point to the newly created mutex. At the end of the constructor
+  // of the final object, other is unlocked.
+  template<typename... ARGS>
+  requires ((!std::is_base_of_v<Unlocked<TrackedLockedType, POLICY_MUTEX>, std::decay_t<ARGS>> &&
+        !std::is_convertible_v<std::decay_t<ARGS>, LockFinalCopy<Unlocked<TrackedLockedType, POLICY_MUTEX>>> &&
+        !std::is_convertible_v<std::decay_t<ARGS>, LockFinalMove<Unlocked<TrackedLockedType, POLICY_MUTEX>>>) && ...)
+  explicit UnlockedTrackedObject(LockFinalMove<UnlockedTrackedObject> other, ARGS&&... args) :
+    Unlocked<TrackedLockedType, POLICY_MUTEX>(std::move(other), std::forward<ARGS>(args)...)
+  {
+    auto& mutex = this->mutex();
+    this->tracker_->update_mutex_pointer(&mutex);
+  }
+
+  // Make sure that the normal move constructor also uses the above.
+  // Note that because the constructor that accepts a LockFinalCopy as first argument does not accept
+  // any other arguments, it is safe not to provide constructors that accept an rvalue reference plus
+  // additional arguments: that will just use the above constructor.
+  UnlockedTrackedObject(UnlockedTrackedObject&& other) : UnlockedTrackedObject(LockFinalMove<UnlockedTrackedObject>{std::move(other)}) { }
+
+ public:
+  // Give access to tracker.
+  using Unlocked<TrackedLockedType, POLICY_MUTEX>::tracker;
+  using Unlocked<TrackedLockedType, POLICY_MUTEX>::operator std::weak_ptr<typename TrackedLockedType::tracker_type>;
 };
 
 } // namespace threadsafe
