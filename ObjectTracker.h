@@ -155,7 +155,7 @@ class ObjectTracker
   tracked_unlocked_ptr_type tracked_unlocked_ptr_;
 
   // Used by trackers that are derived from ObjectTracker.
-  ObjectTracker(tracked_type const& tracked_unlocked) : tracked_unlocked_ptr_(tracked_unlocked) { }
+  ObjectTracker(tracked_type& tracked_unlocked) : tracked_unlocked_ptr_(tracked_unlocked) { }
 
  public:
   // Construct a new ObjectTracker that tracks tracked_unlocked.
