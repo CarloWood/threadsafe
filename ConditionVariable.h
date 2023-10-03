@@ -39,7 +39,7 @@ namespace threadsafe
 //
 // Declaration:
 //
-// using foo_type = threadsafe::Wrapper<Foo, threadsafe::policy::Primitive<threadsafe::ConditionVariable>>;
+// using foo_type = threadsafe::Unlocked<Foo, threadsafe::policy::Primitive<threadsafe::ConditionVariable>>;
 // foo_type foo_cv;
 //
 // Waiting:
