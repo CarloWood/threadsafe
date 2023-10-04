@@ -615,11 +615,11 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
  * base class pointer.
  */
 
-#if THREADSAFE_DEBUG
 // Forward declarations.
 template<typename BASE, typename POLICY_MUTEX>
 class UnlockedBase;
 
+#if THREADSAFE_DEBUG
 template<typename BASE, typename POLICY_MUTEX>
 class ConstUnlockedBase;
 
