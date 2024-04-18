@@ -14,12 +14,6 @@ include(AICxxProject)
 # This project is an OBJECT-library, used by other git submodules and the main project.
 add_library(threadsafe_ObjLib OBJECT)
 
-# Set SOURCE_DIR to the current directory.
-set_property(
-  TARGET threadsafe_ObjLib
-  PROPERTY SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-
 # The list of source files.
 target_sources(threadsafe_ObjLib
   PRIVATE
