@@ -30,7 +30,7 @@
 #endif
 
 #ifdef CWDEBUG
-// Set to 1 to enable very extentive debug output with regard to this class; as well as enable static_asserts at the end.
+// Set to 1 to enable very extensive debug output with regard to this class; as well as enable static_asserts at the end.
 // You'll need to add -fconstexpr-steps=100000000 to CXXFLAGS for the static asserts when this is defined (and DEBUG_STATIC_ASSERTS isn't).
 #define DEBUG_RWSPINLOCK 0
 #endif
