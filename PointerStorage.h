@@ -49,7 +49,7 @@ namespace threadsafe {
 // which causes a reallocation.
 //
 // Such reallocation might move the storage in memory, therefore
-// indices are used to refer to the place in the storage where
+// indexes are used to refer to the place in the storage where
 // a pointer is stored, for fast erasure. That in turn requires
 // that pointers are never moved relative to the storage however,
 // so that an additional accounting is necessary to keep track
@@ -60,7 +60,7 @@ namespace threadsafe {
 //
 //             pos:
 //                 .------------.                  .-----.
-// m_storage --> 0 | free       |  m_free_indices: |  0  |
+// m_storage --> 0 | free       |  m_free_indexes: |  0  |
 //               1 | free       |                  |  1  |
 //               2 | free       |                  |  2  |
 //               3 | free       |                  |  3  |
@@ -85,7 +85,7 @@ namespace threadsafe {
 //
 //                 m_size == 8
 //                 .------------.                  .-----.
-// m_storage --> 0 | ptr0       |  m_free_indices: |  0  |
+// m_storage --> 0 | ptr0       |  m_free_indexes: |  0  |
 //               1 | ptr1       |                  |  1  |
 //               2 | ptr2       |                  |  2  |
 //               3 | ptr3       |                  |  3  |
@@ -108,7 +108,7 @@ namespace threadsafe {
 //
 //                 m_size == 8
 //                 .------------.                  .-----.
-// m_storage --> 0 |            |  m_free_indices: |  0  |
+// m_storage --> 0 |            |  m_free_indexes: |  0  |
 //               1 |            |                  |  1  |
 //               2 | ptr2       |                  |  1  | <-- m_last_freed_index == 8
 //               3 | ptr3       |                  |  6  |
@@ -119,11 +119,11 @@ namespace threadsafe {
 //                 `------------'                  `-----'
 //
 // In other words, any element of m_storage can end up used or free; and
-// all elements in m_free_indices at m_last_freed_index and higher are relevant:
-// free indices of m_storage in reverse order that they were erased.
+// all elements in m_free_indexes at m_last_freed_index and higher are relevant:
+// free indexes of m_storage in reverse order that they were erased.
 //
 // This means that an erase followed by an insert, writes and then reads
-// the same memory location in m_free_indices, which is cache friendly.
+// the same memory location in m_free_indexes, which is cache friendly.
 // m_storage is only written to.
 //
 class VoidPointerStorage
@@ -136,13 +136,13 @@ class VoidPointerStorage
   mutable AIReadWriteSpinLock m_rwlock;
   index_type m_size;
   std::vector<void*> m_storage;
-  mutable boost::lockfree::stack<index_type> m_free_indices;
+  mutable boost::lockfree::stack<index_type> m_free_indexes;
 
  private:
   void increase_size(uint32_t initial_size = 0);
 
  public:
-  VoidPointerStorage(uint32_t initial_size) : m_size(0), m_free_indices(initial_size)
+  VoidPointerStorage(uint32_t initial_size) : m_size(0), m_free_indexes(initial_size)
   {
     m_rwlock.rdlock();                  // Must have read-lock before calling increase_size!
     increase_size(initial_size);
@@ -157,7 +157,7 @@ class VoidPointerStorage
       m_rwlock.rdlock();
       try
       {
-        while (AI_UNLIKELY(!m_free_indices.pop(index)))
+        while (AI_UNLIKELY(!m_free_indexes.pop(index)))
           increase_size();      // Converts m_rwlock from read to write lock (which might throw) and back.
       }
       catch (std::exception const&)
@@ -176,7 +176,7 @@ class VoidPointerStorage
   void erase(index_type pos)
   {
     m_rwlock.rdlock();
-    m_free_indices.bounded_push(pos);
+    m_free_indexes.bounded_push(pos);
     m_rwlock.rdunlock();
   }
 
@@ -212,17 +212,17 @@ struct PointerStorage : public VoidPointerStorage
 template<typename T>
 void PointerStorage<T>::for_each(std::function<void(T*)> callback)
 {
-  std::vector<index_type> free_indices;
+  std::vector<index_type> free_indexes;
   m_rwlock.wrlock();
-  m_free_indices.consume_all([this, &free_indices](index_type index){
+  m_free_indexes.consume_all([this, &free_indexes](index_type index){
     m_storage[index] = nullptr;
-    free_indices.push_back(index);
+    free_indexes.push_back(index);
   });
   for (void* ptr : m_storage)
     if (ptr)
       callback(static_cast<T*>(ptr));
-  for (index_type index : free_indices)
-    m_free_indices.bounded_push(index);
+  for (index_type index : free_indexes)
+    m_free_indexes.bounded_push(index);
   m_rwlock.wrunlock();
 }
 
