@@ -31,21 +31,25 @@ target_sources(threadsafe_ObjLib
 )
 
 # Required include search-paths.
-get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
-target_include_directories(threadsafe_ObjLib
-  PUBLIC
-    "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}" # For sys.h and debug.h.
-)
+if (TARGET AICxx::cwds)
+  get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
+  target_include_directories(threadsafe_ObjLib
+    PUBLIC
+      "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}" # For sys.h and debug.h.
+  )
+endif ()
 
-# Require support for C++17.
+if (TARGET AICxx::utils)
+  # Set link dependencies.
+  target_link_libraries(threadsafe_ObjLib
+    PUBLIC
+      AICxx::utils
+  )
+endif ()
+
+# Require support for C++20.
 target_compile_features(threadsafe_ObjLib
-  PUBLIC cxx_std_17
-)
-
-# Set link dependencies.
-target_link_libraries(threadsafe_ObjLib
-  PUBLIC
-    AICxx::utils
+  PUBLIC cxx_std_20
 )
 
 # Create an ALIAS target.
