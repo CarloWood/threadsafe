@@ -143,7 +143,7 @@
 
 #ifdef CWDEBUG
 // Set this to 1 to print tracking information about Unlocked and UnlockedBase to dc::tracked.
-#define THREADSAFE_TRACK_UNLOCKED 1
+#define THREADSAFE_TRACK_UNLOCKED 0
 #if THREADSAFE_TRACK_UNLOCKED
 #include <cwds/tracked.h>
 #include <libcwd/type_info.h>
