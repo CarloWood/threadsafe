@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12...3.16)
+cmake_minimum_required(VERSION 3.12...4.3.3)
 
 project(threadsafe
   DESCRIPTION "Threading utilities: object oriented (read/write) locking and more"

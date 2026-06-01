@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 Carlo Wood
+// SPDX-License-Identifier: MIT
+
 #ifndef THREADSAFE_OBJECT_TRACKER_H
 #error "ObjectTracker.inl.h only needs to be included in TU's that include ObjectTracker.h (directly or indirectly). Include it below other header files."
 #endif
