@@ -12,9 +12,10 @@ providing C++ utilities for larger projects, including:
 * Several utilities like <tt>is_single_threaded</tt>.
 
 The root project should be using
-[cmake](https://cmake.org/overview/)
-[cwm4](https://github.com/CarloWood/cwm4) and
-[libcwd](https://github.com/CarloWood/libcwd).
+[cmake](https://cmake.org/overview/),
+[cmake-aicxx](https://github.com/CarloWood/cmake-aicxx) or
+[cwm4](https://github.com/CarloWood/cwm4),
+and [libcwd](https://github.com/CarloWood/libcwd).
 
 ## Example
 
