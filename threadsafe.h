@@ -64,13 +64,13 @@
 #pragma once
 
 #include "utils/threading/aithreadid.h"
-#include "utils/AIRefCount.h"
 #include "utils/is_specialization_of.h"
 
 #include <new>
 #include <cstddef>
 #include <memory>
 #include <cassert>
+#include <concepts>
 #include <type_traits>
 #include <atomic>
 #include <mutex>
@@ -88,6 +88,8 @@
 #else
 #define THREADSAFE_DEBUG 0
 #endif
+
+class AIRefCount;
 
 namespace threadsafe {
 
