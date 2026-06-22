@@ -191,7 +191,7 @@ class LockFinalMove
  *
  * For example,
  *
- * <code>
+ * ```cpp
  * class Foo { public: Foo(int, int); };	// Some user defined type.
  * using foo_t = threadsafe::Unlocked<Foo, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;	// Wrapper type for Foo.
  * foo_t foo(2, 3);				// Instantiation of a Foo(2, 3).
@@ -205,9 +205,9 @@ class LockFinalMove
  *   foo_t::wat foo_w(foo);			// Scoped write-lock for foo.
  *   // Use foo_w-> for write access (returns a Foo*).
  * }
- * </code>
+ * ```
  *
- * If <code>foo</code> is constant, you have to use <code>crat</code>.
+ * If `foo` is constant, you have to use `crat`.
  *
  * It is possible to pass access objects to a function that
  * downgrades the access (wat -> rat -> crat (crat is a base
@@ -215,15 +215,15 @@ class LockFinalMove
  *
  * For example:
  *
- * <code>
+ * ```cpp
  * void readfunc(foo_t::crat const& read_access);
  *
  * foo_t::wat foo_w(foo);
  * readfunc(foo_w);	// readfunc will perform read access on foo_w
  *                      // (without releasing the write lock!).
- * </code>
+ * ```
  *
- * It is therefore highly recommended to use <code>f(foo_t::crat const& foo_r)</code>
+ * It is therefore highly recommended to use `f(foo_t::crat const& foo_r)`
  * as signature for functions that only read foo, unless that function (sometimes)
  * needs to convert its argument to a wat for writing. The latter implies that
  * it might throw a std::exception however (at least that is what AIReadWriteMutex
@@ -232,7 +232,7 @@ class LockFinalMove
  *
  * For example,
  *
- * <code>
+ * ```cpp
  * using foo_t = threadsafe::Unlocked<Foo, threadsafe::policy::ReadWrite<AIReadWriteMutex>>;
  * foo_t foo;
  *
@@ -262,18 +262,18 @@ class LockFinalMove
  *     }
  *     break;
  *   }
- * </code>
+ * ```
  *
- * Note that you can only upgrade a read access type (<code>rat</code>) to a
- * write access type (<code>wat</code>) when the rat is non-const.
+ * Note that you can only upgrade a read access type (`rat`) to a
+ * write access type (`wat`) when the rat is non-const.
  *
  * To summarize, the following function arguments make sense:
  *
- * <code>
+ * ```cpp
  * void f(foo_t::crat const& foo_r);	// Only ever reads.
  * void f(foo_t::rat& foo_r);		// Mostly reads, but sometimes acquires write access in some code path (which might throw).
  * void f(foo_t::wat const& foo_w);	// Writes (most likely, not necessarily always of course).
- * </code>
+ * ```
  *
  * This API is pretty robust; if you try anything that could result in problems
  * it simply won't compile. The only mistake one can still easily make is
@@ -281,7 +281,7 @@ class LockFinalMove
  * an object in between accesses while the state of the object should be
  * preserved. For example:
  *
- * <code>
+ * ```cpp
  * // This resets foo to point to the first file and then returns that.
  * std::string filename = foo_t::wat(foo)->get_first_filename();
  *
@@ -295,7 +295,7 @@ class LockFinalMove
  *   something(filename);
  *   filename = foo_w->next_filename();
  * }
- * </code>
+ * ```
  *
  * Where we assume that next_filename is a const member function (using a mutable
  * internally or something). The only-needs-read-access problem above, can easily
@@ -303,7 +303,7 @@ class LockFinalMove
  * object locked while going from write access to read access we'd have to do the
  * following:
  *
- * <code>
+ * ```cpp
  * for(;;)
  * {
  *   try
@@ -323,7 +323,7 @@ class LockFinalMove
  *   }
  *   break;
  * }
- * </code>
+ * ```
  *
  * And while for most practical cases this will perform perfectly,
  * it is slightly annoying that the construction of the wat from
@@ -333,7 +333,7 @@ class LockFinalMove
  * If this is the case (no need for read access before the write)
  * then one can do the following instead:
  *
- * <code>
+ * ```cpp
  * foo_t::w2rCarry carry(foo);
  * std::string filename = foo_t::wat(carry)->get_first_filename();
  * foo_t::rat foo_r(carry);
@@ -342,7 +342,7 @@ class LockFinalMove
  *   something(filename);
  *   filename = foo_r->next_filename();
  * }
- * </code>
+ * ```
  *
  * where the construction of the carry does not obtain a lock,
  * but causes the object to remain read-locked after the destruction
@@ -522,17 +522,17 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
  *
  * Example usage:
  *
- * <code>
+ * ```cpp
  * class B { public: void modify(); void print() const; };
  * class A : public B { ... };
  *
  * using UnlockedA = Unlocked<A, policy::ReadWrite<AIReadWriteMutex>>;
  * using UnlockedB = UnlockedBase<B, UnlockedA::policy_type>;
- * </code>
+ * ```
  *
  * Now UnlockedB can be created from an UnlockedA and then used in the usual way:
  *
- * <code>
+ * ```cpp
  * void f(UnlockedB b)
  * {
  *   {
@@ -544,7 +544,7 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
  *     b_r->print();
  *   }
  * }
- * </code>
+ * ```
  *
  * Note that an UnlockedBase is a pointer/reference to the Unlocked that it was created from:
  * you may not move or destroy the Unlocked that it was created from!
