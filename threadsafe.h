@@ -87,6 +87,7 @@
 #define THREADSAFE_DEBUG 1
 #else
 #define THREADSAFE_DEBUG 0
+#define THREADSAFE_TRACK_UNLOCKED 0
 #endif
 
 class AIRefCount;
