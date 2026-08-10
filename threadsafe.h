@@ -76,6 +76,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <boost/integer/common_factor.hpp>
+#include "debug.h"      // ASSERT
 
 #ifdef CWDEBUG
 // Set this to 1 to print tracking information about Unlocked and UnlockedBase to dc::tracked.
