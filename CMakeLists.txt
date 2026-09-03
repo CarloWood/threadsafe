@@ -30,20 +30,12 @@ target_sources(threadsafe_ObjLib
     "threadsafe.h"
 )
 
-# Required include search-paths.
-if (TARGET AICxx::cwds)
-  get_target_property(CWDS_INTERFACE_INCLUDE_DIRECTORIES AICxx::cwds INTERFACE_INCLUDE_DIRECTORIES)
-  target_include_directories(threadsafe_ObjLib
-    PUBLIC
-      "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}" # For sys.h and debug.h.
-  )
-endif ()
-
 if (TARGET AICxx::utils)
   # Set link dependencies.
   target_link_libraries(threadsafe_ObjLib
     PUBLIC
       AICxx::utils
+      AICxx::cwds
   )
 endif ()
 
