@@ -161,7 +161,7 @@ class VoidPointerStorage
     return m_storage[pos];
   }
 
-#ifdef CWDEBUG
+#if CW_DEBUG
   // Extremely expensive function.
   bool debug_empty() const;
 #endif
