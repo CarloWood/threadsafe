@@ -358,6 +358,40 @@ class LockFinalMove
  * still require actual read to write locking and therefore could
  * throw anyway: if that is needed then just use the try / catch
  * block approach.
+ *
+ *
+ * Deriving from a protected base class (new since Oct 2026)
+ * ---------------------------------------------------------
+ *
+ * It is now possible to create a custom `Unlocked` type by deriving from a *protected*
+ * `threadsafe::Unlocked`, giving more control over its interface.
+ *
+ * The access types `crat`, `rat` and `wat` still need to be made public of course.
+ * The custom class must also define these `threadsafe_access` hidden friend functions:
+ *
+ * ```cpp
+ * template<typename T, typename POLICY_MUTEX>
+ * class UnlockedData : protected threadsafe::Unlocked<T, POLICY_MUTEX>, public MyData
+ * {
+ *  public:
+ *   using unlocked_type = threadsafe::Unlocked<T, POLICY_MUTEX>;
+ *   using crat = unlocked_type::crat;
+ *   using rat = unlocked_type::rat;
+ *   using wat = unlocked_type::wat;
+ *
+ * ...
+ *
+ *  private:
+ *   static unlocked_type& as_unlocked(UnlockedData& data) { return static_cast<unlocked_type&>(data); }
+ *   static unlocked_type const& as_unlocked(UnlockedData const& data) { return static_cast<unlocked_type const&>(data); }
+ *
+ *   friend unlocked_type& threadsafe_access(UnlockedData& data, threadsafe::AccessKey<unlocked_type>) { return as_unlocked(data); }
+ *   friend unlocked_type const& threadsafe_access(UnlockedData const& data, threadsafe::AccessKey<unlocked_type>) { return as_unlocked(data); }
+ * };
+ * ```
+ *
+ * which declares an `Unlocked` type with extra members (from `MyData`) that are not
+ * protected by a lock.
  */
 #if THREADSAFE_TRACK_UNLOCKED
 template<typename T, typename POLICY_MUTEX>
@@ -1095,6 +1129,15 @@ struct AccessConst
       this->m_unlocked->UNLOCKED::policy_type::mutex().lock(std::forward<Args>(args)...);
     }
 
+    // Construct through an owner's hidden friend without making its Unlocked base public.
+    template<typename OWNER, typename ...Args>
+    requires (!std::same_as<std::remove_cvref_t<OWNER>, UNLOCKED> &&
+              requires(OWNER&& owner) { threadsafe_access(std::forward<OWNER>(owner), AccessKey<UNLOCKED>{}); })
+    AccessConst(OWNER&& owner, Args&&... args) :
+        AccessConst(threadsafe_access(std::forward<OWNER>(owner), AccessKey<UNLOCKED>{}), std::forward<Args>(args)...)
+    {
+    }
+
     /// Access the underlaying object for read access.
     typename UNLOCKED::data_type const* operator->() const { return this->m_unlocked->ptr(); }
 
@@ -1160,6 +1203,13 @@ struct ConstAccess : public AccessConst<UNLOCKED>
     template<typename ...Args>
     explicit ConstAccess(UNLOCKED& unlocked, Args&&... args) : AccessConst<UNLOCKED>(unlocked, std::forward<Args>(args)...) { }
 
+    // Construct through the same protected-base owner adapter as AccessConst, but only for a non-const owner.
+    template<typename OWNER, typename ...Args>
+    requires (!std::same_as<std::remove_cvref_t<OWNER>, UNLOCKED> &&
+              !std::is_const_v<std::remove_reference_t<OWNER>> &&
+              std::constructible_from<AccessConst<UNLOCKED>, OWNER&, Args...>)
+    explicit ConstAccess(OWNER& owner, Args&&... args) : AccessConst<UNLOCKED>(owner, std::forward<Args>(args)...) { }
+
     operator AccessConst<typename UNLOCKED::const_unlocked_type> const&() const
     {
       static_assert(sizeof(AccessConst<UNLOCKED>) == sizeof(void*), "Unexpected size when doing reinterpret_cast");
@@ -1219,6 +1269,15 @@ struct OTAccessConst
 #endif // THREADSAFE_DEBUG
     }
 
+    // Construct through an owner's hidden friend without making its Unlocked base public.
+    template<typename OWNER, typename ...Args>
+    requires (!std::same_as<std::remove_cvref_t<OWNER>, UNLOCKED> &&
+              requires(OWNER&& owner) { threadsafe_access(std::forward<OWNER>(owner), AccessKey<UNLOCKED>{}); })
+    OTAccessConst(OWNER&& owner, Args&&... args) :
+        OTAccessConst(threadsafe_access(std::forward<OWNER>(owner), AccessKey<UNLOCKED>{}), std::forward<Args>(args)...)
+    {
+    }
+
 #if THREADSAFE_DEBUG
     ~OTAccessConst()
     {
@@ -1255,6 +1314,13 @@ struct OTConstAccess : public OTAccessConst<UNLOCKED>
     /// Construct an OTConstAccess from a non-constant Unlocked.
     template<typename ...Args>
     explicit OTConstAccess(UNLOCKED& unlocked, Args&&... args) : OTAccessConst<UNLOCKED>(unlocked, std::forward<Args>(args)...) { }
+
+    // Construct through the same protected-base owner adapter as OTAccessConst, but only for a non-const owner.
+    template<typename OWNER, typename ...Args>
+    requires (!std::same_as<std::remove_cvref_t<OWNER>, UNLOCKED> &&
+              !std::is_const_v<std::remove_reference_t<OWNER>> &&
+              std::constructible_from<OTAccessConst<UNLOCKED>, OWNER&, Args...>)
+    explicit OTConstAccess(OWNER& owner, Args&&... args) : OTAccessConst<UNLOCKED>(owner, std::forward<Args>(args)...) { }
 
     operator OTAccessConst<typename UNLOCKED::const_unlocked_type> const&() const
     {
