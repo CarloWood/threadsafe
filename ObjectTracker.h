@@ -146,9 +146,9 @@ class ObjectTracker
 
     void update_mutex_pointer(auto* mutex_ptr)
     {
-      if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<tracked_type, policy_type>>>)
+      if constexpr (std::is_base_of_v<WriteAccess<Unlocked<tracked_type, policy_type>>, wat>)
         this->m_read_write_mutex_ptr = mutex_ptr;
-      else if constexpr (std::is_same_v<wat, Access<Unlocked<tracked_type, policy_type>>>)
+      else if constexpr (std::is_base_of_v<Access<Unlocked<tracked_type, policy_type>>, wat>)
         this->m_primitive_mutex_ptr = mutex_ptr;
     }
   };

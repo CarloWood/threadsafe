@@ -1260,9 +1260,9 @@ OTAccess<UNLOCKED> const& wat_cast(OTConstAccess<UNLOCKED> const& access)
 template<typename T, typename POLICY_MUTEX>
 Unlocked<T, POLICY_MUTEX> const& Unlocked<T, POLICY_MUTEX>::do_rdlock() /*threadsafe-*/const
 {
-  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+  if constexpr (std::is_base_of_v<WriteAccess<Unlocked<T, POLICY_MUTEX>>, wat>)
     this->mutex().rdlock();
-  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+  else if constexpr (std::is_base_of_v<Access<Unlocked<T, POLICY_MUTEX>>, wat>)
     this->mutex().lock();
   return *this;
 }
@@ -1270,18 +1270,18 @@ Unlocked<T, POLICY_MUTEX> const& Unlocked<T, POLICY_MUTEX>::do_rdlock() /*thread
 template<typename T, typename POLICY_MUTEX>
 void Unlocked<T, POLICY_MUTEX>::do_rdunlock() /*threadsafe-*/const
 {
-  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+  if constexpr (std::is_base_of_v<WriteAccess<Unlocked<T, POLICY_MUTEX>>, wat>)
     this->mutex().rdunlock();
-  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+  else if constexpr (std::is_base_of_v<Access<Unlocked<T, POLICY_MUTEX>>, wat>)
     this->mutex().unlock();
 }
 
 template<typename T, typename POLICY_MUTEX>
 Unlocked<T, POLICY_MUTEX>& Unlocked<T, POLICY_MUTEX>::do_wrlock()
 {
-  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+  if constexpr (std::is_base_of_v<WriteAccess<Unlocked<T, POLICY_MUTEX>>, wat>)
     this->mutex().wrlock();
-  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+  else if constexpr (std::is_base_of_v<Access<Unlocked<T, POLICY_MUTEX>>, wat>)
     this->mutex().lock();
   return *this;
 }
@@ -1289,9 +1289,9 @@ Unlocked<T, POLICY_MUTEX>& Unlocked<T, POLICY_MUTEX>::do_wrlock()
 template<typename T, typename POLICY_MUTEX>
 void Unlocked<T, POLICY_MUTEX>::do_wrunlock()
 {
-  if constexpr (std::is_same_v<wat, WriteAccess<Unlocked<T, POLICY_MUTEX>>>)
+  if constexpr (std::is_base_of_v<WriteAccess<Unlocked<T, POLICY_MUTEX>>, wat>)
     this->mutex().wrunlock();
-  else if constexpr (std::is_same_v<wat, Access<Unlocked<T, POLICY_MUTEX>>>)
+  else if constexpr (std::is_base_of_v<Access<Unlocked<T, POLICY_MUTEX>>, wat>)
     this->mutex().unlock();
 }
 
