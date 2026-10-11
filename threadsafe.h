@@ -559,18 +559,60 @@ class Unlocked : public POLICY_MUTEX,           // Initialize this first because
 template<typename BASE, typename POLICY_MUTEX>
 class UnlockedBase;
 
-#if THREADSAFE_DEBUG
-template<typename BASE, typename POLICY_MUTEX>
-class ConstUnlockedBase;
-
 template<class UNLOCKED>
 struct ConstReadAccess;
+
+template<class UNLOCKED>
+requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
+struct ReadAccess;
+
+template<class UNLOCKED>
+requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
+struct WriteAccess;
 
 template<class UNLOCKED>
 struct AccessConst;
 
 template<class UNLOCKED>
+requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
+struct ConstAccess;
+
+template<class UNLOCKED>
+requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
+struct Access;
+
+template<class UNLOCKED>
 struct OTAccessConst;
+
+template<class UNLOCKED>
+requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
+struct OTConstAccess;
+
+template<class UNLOCKED>
+requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
+struct OTAccess;
+
+// Badge passed only by access classes while adapting an owner with a non-public Unlocked base.
+template<class UNLOCKED>
+class AccessKey
+{
+  private:
+    AccessKey() = default;
+
+    friend struct ConstReadAccess<UNLOCKED>;
+    friend struct ReadAccess<UNLOCKED>;
+    friend struct WriteAccess<UNLOCKED>;
+    friend struct AccessConst<UNLOCKED>;
+    friend struct ConstAccess<UNLOCKED>;
+    friend struct Access<UNLOCKED>;
+    friend struct OTAccessConst<UNLOCKED>;
+    friend struct OTConstAccess<UNLOCKED>;
+    friend struct OTAccess<UNLOCKED>;
+};
+
+#if THREADSAFE_DEBUG
+template<typename BASE, typename POLICY_MUTEX>
+class ConstUnlockedBase;
 #endif
 
 #if THREADSAFE_TRACK_UNLOCKED
@@ -908,14 +950,6 @@ struct ConstReadAccess
     // Move constructor.
     ConstReadAccess(ConstReadAccess&& rvalue) : m_unlocked(rvalue.m_unlocked), m_state(rvalue.m_state) { rvalue.m_unlocked = nullptr; }
 };
-
-template<class UNLOCKED>
-requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
-struct ReadAccess;
-
-template<class UNLOCKED>
-requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
-struct WriteAccess;
 
 /**
  * @brief Allow to carry the read access from a wat to a rat.
