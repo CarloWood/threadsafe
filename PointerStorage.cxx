@@ -43,7 +43,7 @@ void VoidPointerStorage::increase_size(uint32_t initial_size)
   m_rwlock.wr2rdlock();
 }
 
-#ifdef CWDEBUG
+#if CW_DEBUG
 bool VoidPointerStorage::debug_empty() const
 {
   // The storage contains no pointers when all indexes are free.
