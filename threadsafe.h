@@ -634,14 +634,28 @@ class AccessKey
     AccessKey() = default;
 
     friend struct ConstReadAccess<UNLOCKED>;
-    friend struct ReadAccess<UNLOCKED>;
-    friend struct WriteAccess<UNLOCKED>;
     friend struct AccessConst<UNLOCKED>;
-    friend struct ConstAccess<UNLOCKED>;
-    friend struct Access<UNLOCKED>;
     friend struct OTAccessConst<UNLOCKED>;
-    friend struct OTConstAccess<UNLOCKED>;
-    friend struct OTAccess<UNLOCKED>;
+
+    // Friend the constrained templates without naming invalid mutable-access specializations when UNLOCKED is a ConstUnlockedBase.
+    template<class U>
+    requires utils::is_specialization_of_v<U, Unlocked> || utils::is_specialization_of_v<U, UnlockedBase>
+    friend struct ReadAccess;
+    template<class U>
+    requires utils::is_specialization_of_v<U, Unlocked> || utils::is_specialization_of_v<U, UnlockedBase>
+    friend struct WriteAccess;
+    template<class U>
+    requires utils::is_specialization_of_v<U, Unlocked> || utils::is_specialization_of_v<U, UnlockedBase>
+    friend struct ConstAccess;
+    template<class U>
+    requires utils::is_specialization_of_v<U, Unlocked> || utils::is_specialization_of_v<U, UnlockedBase>
+    friend struct Access;
+    template<class U>
+    requires utils::is_specialization_of_v<U, Unlocked> || utils::is_specialization_of_v<U, UnlockedBase>
+    friend struct OTConstAccess;
+    template<class U>
+    requires utils::is_specialization_of_v<U, Unlocked> || utils::is_specialization_of_v<U, UnlockedBase>
+    friend struct OTAccess;
 };
 
 #if THREADSAFE_DEBUG
