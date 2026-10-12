@@ -366,7 +366,8 @@ class LockFinalMove
  * It is now possible to create a custom `Unlocked` type by deriving from a *protected*
  * `threadsafe::Unlocked`, giving more control over its interface.
  *
- * The access types `crat`, `rat` and `wat` still need to be made public of course.
+ * The access types `crat`, `rat`, `wat` and, for ReadWrite policies, `w2rCarry`
+ * still need to be made public of course.
  * The custom class must also define these `threadsafe_access` hidden friend functions:
  *
  * ```cpp
@@ -378,6 +379,7 @@ class LockFinalMove
  *   using crat = unlocked_type::crat;
  *   using rat = unlocked_type::rat;
  *   using wat = unlocked_type::wat;
+ *   using w2rCarry = unlocked_type::w2rCarry;
  *
  * ...
  *
@@ -609,6 +611,10 @@ struct AccessConst;
 
 template<class UNLOCKED>
 requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
+class Write2ReadCarry;
+
+template<class UNLOCKED>
+requires utils::is_specialization_of_v<UNLOCKED, Unlocked> || utils::is_specialization_of_v<UNLOCKED, UnlockedBase>
 struct ConstAccess;
 
 template<class UNLOCKED>
@@ -656,6 +662,9 @@ class AccessKey
     template<class U>
     requires utils::is_specialization_of_v<U, Unlocked> || utils::is_specialization_of_v<U, UnlockedBase>
     friend struct OTAccess;
+    template<class U>
+    requires utils::is_specialization_of_v<U, Unlocked> || utils::is_specialization_of_v<U, UnlockedBase>
+    friend class Write2ReadCarry;
 };
 
 #if THREADSAFE_DEBUG
@@ -957,6 +966,22 @@ struct ConstReadAccess
       m_unlocked->UNLOCKED::policy_type::mutex().rdlock(std::forward<Args>(args)...);
     }
 
+    // Construct through an owner's hidden friend without exposing its protected Unlocked base.
+    // Access and carry objects are excluded so their move, promotion and carry overloads retain their lock-state semantics.
+    template<typename OWNER, typename ...Args>
+    requires (!std::same_as<std::remove_cvref_t<OWNER>, UNLOCKED> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, ConstReadAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, ReadAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, WriteAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, Write2ReadCarry> &&
+              requires(OWNER const& owner) {
+                { threadsafe_access(owner, AccessKey<UNLOCKED>{}) } -> std::same_as<UNLOCKED const&>;
+              })
+    ConstReadAccess(OWNER const& owner, Args&&... args) :
+        ConstReadAccess(threadsafe_access(owner, AccessKey<UNLOCKED>{}), std::forward<Args>(args)...)
+    {
+    }
+
     /// Destruct the Access object.
     // These should never be dynamically allocated, so there is no need to make this virtual.
     ~ConstReadAccess()
@@ -1017,6 +1042,20 @@ class Write2ReadCarry
       m_unlocked.increment_ref();
 #endif // THREADSAFE_DEBUG
     }
+
+    // Carry construction only records the mutable owner; the existing constructor deliberately obtains no lock.
+    template<typename OWNER>
+    requires (!std::is_const_v<OWNER> &&
+              !std::same_as<std::remove_cvref_t<OWNER>, UNLOCKED> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, ConstReadAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, ReadAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, WriteAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, Write2ReadCarry> &&
+              requires(OWNER& owner) {
+                { threadsafe_access(owner, AccessKey<UNLOCKED>{}) } -> std::same_as<UNLOCKED&>;
+              })
+    explicit Write2ReadCarry(OWNER& owner) : Write2ReadCarry(threadsafe_access(owner, AccessKey<UNLOCKED>{})) { }
+
     ~Write2ReadCarry()
     {
 #if THREADSAFE_DEBUG
@@ -1047,6 +1086,22 @@ struct ReadAccess : public ConstReadAccess<UNLOCKED>
     explicit ReadAccess(UNLOCKED& unlocked, Args&&... args) : ConstReadAccess<UNLOCKED>(unlocked, readlocked)
     {
       this->m_unlocked->UNLOCKED::policy_type::mutex().rdlock(std::forward<Args>(args)...);
+    }
+
+    // Adapt only mutable owners; access and carry arguments belong to the dedicated state-preserving overloads below.
+    template<typename OWNER, typename ...Args>
+    requires (!std::is_const_v<OWNER> &&
+              !std::same_as<std::remove_cvref_t<OWNER>, UNLOCKED> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, ConstReadAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, ReadAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, WriteAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, Write2ReadCarry> &&
+              requires(OWNER& owner) {
+                { threadsafe_access(owner, AccessKey<UNLOCKED>{}) } -> std::same_as<UNLOCKED&>;
+              })
+    explicit ReadAccess(OWNER& owner, Args&&... args) :
+        ReadAccess(threadsafe_access(owner, AccessKey<UNLOCKED>{}), std::forward<Args>(args)...)
+    {
     }
 
     /// Construct a ReadAccess from a Write2ReadCarry object containing an read locked Unlocked. Upon destruction leave the Unlocked read locked.
@@ -1090,6 +1145,22 @@ struct WriteAccess : public ReadAccess<UNLOCKED>
     explicit WriteAccess(UNLOCKED& unlocked, Args&&... args) : ReadAccess<UNLOCKED>(unlocked, writelocked)
     {
       this->m_unlocked->UNLOCKED::policy_type::mutex().wrlock(std::forward<Args>(args)...);
+    }
+
+    // Adapt only mutable owners and leave promotion, carry and move construction to their exact overloads.
+    template<typename OWNER, typename ...Args>
+    requires (!std::is_const_v<OWNER> &&
+              !std::same_as<std::remove_cvref_t<OWNER>, UNLOCKED> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, ConstReadAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, ReadAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, WriteAccess> &&
+              !utils::is_specialization_of_v<std::remove_cvref_t<OWNER>, Write2ReadCarry> &&
+              requires(OWNER& owner) {
+                { threadsafe_access(owner, AccessKey<UNLOCKED>{}) } -> std::same_as<UNLOCKED&>;
+              })
+    explicit WriteAccess(OWNER& owner, Args&&... args) :
+        WriteAccess(threadsafe_access(owner, AccessKey<UNLOCKED>{}), std::forward<Args>(args)...)
+    {
     }
 
     /// Promote read access to write access.
