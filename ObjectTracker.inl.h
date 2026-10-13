@@ -27,7 +27,9 @@ TrackedObject<TrackedType, Tracker>::TrackedObject() :
   static_assert(utils::is_derived_from_specialization_of_v<Tracker, ObjectTracker>,
       "Tracker must be derived from threadsafe::ObjectTracker<TrackedType>.");
 
+#if CW_DEBUG
   tracker_->set_is_initialized();
+#endif
 }
 
 template<typename TrackedType, typename Tracker>
